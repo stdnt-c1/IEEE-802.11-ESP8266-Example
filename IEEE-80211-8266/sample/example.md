@@ -1,22 +1,50 @@
----
 # IEEE 802.11 Management Frame Structure Examples
 
 This document provides annotated code and explanations for the construction of major IEEE 802.11 management frames as implemented in this project. Each example references the relevant section of the IEEE 802.11-2016 standard and explains the purpose of each field and element.
 
-## References
+## General Frame Structure
+All management frames follow this basic structure:
+```
++-------------+-------------+-------------+-------------+
+|                   MAC Header (24 bytes)              |
++-------------+-------------+-------------+-------------+
+|              Frame-specific Fixed Fields             |
++-------------+-------------+-------------+-------------+
+|         Tagged Parameters (Information Elements)      |
++-------------+-------------+-------------+-------------+
+|             Frame Check Sequence (4 bytes)           |
++-------------+-------------+-------------+-------------+
+```
 
+## References and Documentation
+
+### Primary References
 - [IEEE 802.11-2016 Standard](https://standards.ieee.org/standard/802_11-2016.html)
-- [Wireshark 802.11 Frame Reference](https://www.wireshark.org/docs/wsug_html_chunked/ChAdvDisplayFilterSection.html)
-- [IEEE 802.11 Management Frames](https://en.wikipedia.org/wiki/802.11_Frame_Types)
-- [Beacon Frame](https://en.wikipedia.org/wiki/Beacon_frame)
-- [Association Request Frame](https://en.wikipedia.org/wiki/Association_request_frame)
-- [Deauthentication Frame](https://en.wikipedia.org/wiki/Deauthentication_frame)
-- [Disassociation Frame](https://en.wikipedia.org/wiki/Disassociation_frame)
+- [ESP8266 SDK Documentation](https://docs.espressif.com/projects/esp8266-rtos-sdk/en/latest/esp8266/)
+- [Arduino ESP8266 Core](https://github.com/esp8266/Arduino)
+
+### Frame Type References
+- [IEEE 802.11 Frame Types Overview](https://en.wikipedia.org/wiki/802.11_Frame_Types)
+- [Management Frame Specifications](https://en.wikipedia.org/wiki/802.11_Frame_Types#Management_frames)
+- [Frame Structure Details](https://en.wikipedia.org/wiki/IEEE_802.11#Frame_structure)
 
 ---
 
 ## Association Request Frame
 **Reference:** IEEE 802.11-2016, Section 9.3.3.6
+
+### Frame Structure
+```
++-------------+-------------+-------------+-------------+
+|                   MAC Header (24 bytes)              |
++-------------+-------------+-------------+-------------+
+|   Capability Information  |   Listen Interval        |
+|        (2 bytes)         |      (2 bytes)           |
++-------------+-------------+-------------+-------------+
+|   SSID      |  Supported |    HT       |   Other    |
+|   Element   |   Rates    | Capabilities| Elements   |
++-------------+-------------+-------------+-------------+
+```
 
 ```cpp
 // Builds an Association Request frame for joining an AP
@@ -78,14 +106,29 @@ uint16_t build_association_packet(uint8_t* buffer, const uint8_t* dst_addr, cons
   return pos;
 }
 ```
-**Explanation:**
-- The Association Request frame is used by a station to request association with an AP. It contains a MAC header, fixed parameters (capabilities, listen interval), and a set of tagged parameters (SSID, supported rates, etc.).
-- All fields are set according to the IEEE 802.11-2016 standard for maximum compatibility.
+Field Details:
+- `capability_info`: 0x0011 indicates ESS and Privacy capabilities
+- `listen_interval`: Time station will listen for beacons (in beacon intervals)
+- `Supported Rates`: Basic rates all stations must support
+- `HT Capabilities`: Optional 802.11n high throughput features
 
 ---
 
 ## Beacon Frame
-**Reference:** IEEE 802.11-2016, Section 9.3.3.1
+**Reference:** IEEE 802.11-2016, Section 9.3.3.3
+
+### Frame Structure
+```
++-------------+-------------+-------------+-------------+
+|                   MAC Header (24 bytes)              |
++-------------+-------------+-------------+-------------+
+|                 Timestamp (8 bytes)                  |
++-------------+-------------+-------------+-------------+
+| Beacon      | Capability |                          |
+| Interval    |   Info     |     Tagged Parameters    |
+| (2 bytes)   | (2 bytes)  |                          |
++-------------+-------------+-------------+-------------+
+```
 
 ```cpp
 // Builds a Beacon frame for announcing a network
@@ -125,15 +168,26 @@ uint16_t build_beacon_packet(uint8_t* buffer, const uint8_t* bssid, const char* 
   return pos;
 }
 ```
-**Explanation:**
-- The Beacon frame is periodically broadcast by an AP to announce the presence and capabilities of a wireless network.
-- It contains a MAC header, fixed parameters (timestamp, interval, capability), and a set of tagged parameters (SSID, supported rates, channel, etc.).
-- The Country Information element is optional but improves compatibility with some clients.
+Field Details:
+- `Timestamp`: 8-byte value for synchronization and timing
+- `Beacon Interval`: Time between beacon transmissions (in TUs)
+- `Capability Info`: Network capabilities (ESS, Privacy, etc.)
+- `DS Parameter Set`: Current operating channel
+- `TIM`: Traffic indication for power-saving stations
 
 ---
 
 ## Deauthentication Frame
-**Reference:** IEEE 802.11-2016, Section 9.3.3.12
+**Reference:** IEEE 802.11-2016, Section 9.3.3.13
+
+### Frame Structure
+```
++-------------+-------------+-------------+-------------+
+|                   MAC Header (24 bytes)              |
++-------------+-------------+-------------+-------------+
+|              Reason Code (2 bytes)                   |
++-------------+-------------+-------------+-------------+
+```
 
 ```cpp
 // Builds a Deauthentication frame to force a client to disconnect
@@ -168,14 +222,28 @@ uint16_t build_deauth_packet(uint8_t* buffer, const uint8_t* dst, const uint8_t*
   return pos;
 }
 ```
-**Explanation:**
-- The Deauthentication frame is sent by an AP or client to terminate a connection immediately.
-- Only the MAC header and reason code are required. Adding more elements is not standard and may cause issues.
+Common Reason Codes:
+- `1`: Unspecified reason
+- `2`: Previous authentication invalid
+- `3`: Station leaving BSS/IBSS
+- `4`: Inactivity timeout
+- `6`: Class 2 frame from non-authenticated station
+- `7`: Class 3 frame from non-associated station
+- `8`: Station leaving BSS/IBSS
 
 ---
 
 ## Disassociation Frame
-**Reference:** IEEE 802.11-2016, Section 9.3.3.11
+**Reference:** IEEE 802.11-2016, Section 9.3.3.12
+
+### Frame Structure
+```
++-------------+-------------+-------------+-------------+
+|                   MAC Header (24 bytes)              |
++-------------+-------------+-------------+-------------+
+|              Reason Code (2 bytes)                   |
++-------------+-------------+-------------+-------------+
+```
 
 ```cpp
 // Builds a Disassociation frame to gracefully disconnect a client
@@ -210,126 +278,95 @@ uint16_t build_disassoc_packet(uint8_t* buffer, const uint8_t* dst, const uint8_
   return pos;
 }
 ```
-**Explanation:**
-- The Disassociation frame is used to gracefully terminate an association between a client and an AP.
-- Only the MAC header and reason code are required. Optional elements are commented for reference.
+Reason Codes (Same as Deauthentication):
+- `1`: Unspecified reason
+- `2`: Previous authentication invalid
+- `3`: Station leaving BSS/IBSS
+- `4`: Inactivity timeout
+- `8`: Station leaving BSS/IBSS
 
 ---
 
-/**
- * Build a raw 802.11 Disassociation frame
- */
-uint16_t build_disassoc_packet(uint8_t* buffer, const uint8_t* dst, const uint8_t* src, const uint8_t* bssid, uint16_t reason) {
-  memset(buffer, 0, 512);
-  uint16_t pos = 0;
-  ieee80211_mac_header_t* header = (ieee80211_mac_header_t*)buffer;
-  header->frame_ctrl.protocol_version = 0;
-  header->frame_ctrl.type = 0; // Management
-  header->frame_ctrl.subtype = 10; // Disassociation
-  header->frame_ctrl.to_ds = 0;
-  header->frame_ctrl.from_ds = 0;
-  header->frame_ctrl.more_frag = 0;
-  header->frame_ctrl.retry = 0;
-  header->frame_ctrl.power_mgmt = 0;
-  header->frame_ctrl.more_data = 0;
-  header->frame_ctrl.protected_frame = 0;
-  header->frame_ctrl.order = 0;
-  header->duration_id = 0;
-  memcpy(header->addr1, dst, 6);
-  memcpy(header->addr2, src, 6);
-  memcpy(header->addr3, bssid, 6);
-  header->seq_ctrl = sequence_number++ << 4;
-  pos += sizeof(ieee80211_mac_header_t);
-  buffer[pos++] = reason & 0xFF;
-  buffer[pos++] = (reason >> 8) & 0xFF;
-  return pos;
+## Probe Request Frame
+**Reference:** IEEE 802.11-2016, Section 9.3.3.9
+
+### Frame Structure
+```
++-------------+-------------+-------------+-------------+
+|                   MAC Header (24 bytes)              |
++-------------+-------------+-------------+-------------+
+|   SSID      |  Supported |   Extended  |    HT      |
+|   Element   |   Rates    |   Rates    | Capabilities|
++-------------+-------------+-------------+-------------+
+```
+
+```cpp
+// Builds a Probe Request frame to discover networks
+uint16_t build_probe_request(uint8_t* buffer, const uint8_t* src_addr, const char* ssid) {
+    memset(buffer, 0, 512);
+    uint16_t pos = 0;
+    
+    // MAC Header
+    ieee80211_mac_header_t* header = (ieee80211_mac_header_t*)buffer;
+    header->frame_ctrl.protocol_version = 0;
+    header->frame_ctrl.type = 0; // Management
+    header->frame_ctrl.subtype = 4; // Probe Request
+    header->frame_ctrl.to_ds = 0;
+    header->frame_ctrl.from_ds = 0;
+    header->frame_ctrl.more_frag = 0;
+    header->frame_ctrl.retry = 0;
+    header->frame_ctrl.power_mgmt = 0;
+    header->frame_ctrl.more_data = 0;
+    header->frame_ctrl.protected_frame = 0;
+    header->frame_ctrl.order = 0;
+    header->duration_id = 0;
+    
+    // Broadcast destination
+    memcpy(header->addr1, "\xff\xff\xff\xff\xff\xff", 6);
+    memcpy(header->addr2, src_addr, 6);
+    memcpy(header->addr3, "\xff\xff\xff\xff\xff\xff", 6);
+    header->seq_ctrl = sequence_number++ << 4;
+    pos += sizeof(ieee80211_mac_header_t);
+
+    // SSID Element
+    buffer[pos++] = 0x00; // Element ID: SSID
+    buffer[pos++] = strlen(ssid);
+    memcpy(buffer + pos, ssid, strlen(ssid));
+    pos += strlen(ssid);
+
+    // Supported Rates
+    buffer[pos++] = 0x01; buffer[pos++] = 0x08;
+    buffer[pos++] = 0x82; buffer[pos++] = 0x84;
+    buffer[pos++] = 0x8B; buffer[pos++] = 0x96;
+    buffer[pos++] = 0x0C; buffer[pos++] = 0x12;
+    buffer[pos++] = 0x18; buffer[pos++] = 0x24;
+
+    return pos;
 }
 ```
-[]: # - [IEEE 802.11 Standard](https://standards.ieee.org/standard/802_11-2016.html)
-[]: # - [ESP8266 SDK Documentation](https://docs.espressif.com/projects/esp8266-rtos-sdk/en/latest/esp8266/)
-[]: # - [Arduino ESP8266 Core](https://github.com/esp8266/Arduino)
-[]: # - [IEEE 802.11 Frame Types](https://en.wikipedia.org/wiki/IEEE_802.11#Frame_types)
-[]: # - [IEEE 802.11 Management Frames](https://en.wikipedia.org/wiki/IEEE_802.11#Management_frames)
-[]: # - [IEEE 802.11 Beacon Frame](https://en.wikipedia.org/wiki/Beacon_frame)
-[]: # - [IEEE 802.11 Association Request Frame](https://en.wikipedia.org/wiki/Association_request_frame)
-[]: # - [IEEE 802.11 Deauthentication Frame](https://en.wikipedia.org/wiki/Deauthentication_frame)
-[]: # - [IEEE 802.11 Disassociation Frame](https://en.wikipedia.org/wiki/Disassociation_frame)
-[]: # - [IEEE 802.11 Frame Control Field](https://en.wikipedia.org/wiki/IEEE_802.11#Frame_control_field)
-[]: # - [IEEE 802.11 MAC Address](https://en.wikipedia.org/wiki/MAC_address)
-[]: # - [IEEE 802.11 Frame Structure](https://en.wikipedia.org/wiki/IEEE_802.11#Frame_structure)
-[]: # - [IEEE 802.11 Frame Check Sequence (FCS)](https://en.wikipedia.org/wiki/Frame_check_sequence)
-[]: # - [IEEE 802.11 Management Frame Exchange](https://en.wikipedia.org/wiki/Management_frame_exchange)
-[]: # - [IEEE 802.11 Management Frame Types](https://en.wikipedia.org/wiki/Management_frame_types)
-[]: # - [IEEE 802.11 Management Frame Fields](https://en.wikipedia.org/wiki/Management_frame_fields)
-[]: # - [IEEE 802.11 Management Frame Formats](https://en.wikipedia.org/wiki/Management_frame_formats)
-[]: # - [IEEE 802.11 Management Frame Parameters](https://en.wikipedia.org/wiki/Management_frame_parameters)
-[]: # - [IEEE 802.11 Management Frame Elements](https://en.wikipedia.org/wiki/Management_frame_elements)
-[]: # - [IEEE 802.11 Management Frame Tags](https://en.wikipedia.org/wiki/Management_frame_tags)
-[]: # - [IEEE 802.11 Management Frame Subtypes](https://en.wikipedia.org/wiki/Management_frame_subtypes)
-[]: # - [IEEE 802.11 Management Frame Types and Subtypes](https://en.wikipedia.org/wiki/Management_frame_types_and_subtypes)
-[]: # - [IEEE 802.11 Management Frame Types and Subtypes Table](https://en.wikipedia.org/wiki/Management_frame_types_and_subtypes_table)
-[]: # - [IEEE 802.11 Management Frame Types and Subtypes List](https://en.wikipedia.org/wiki/Management_frame_types_and_subtypes_list)
-[]: # - [IEEE 802.11 Management Frame Types and Subtypes Reference](https://en.wikipedia.org/wiki/Management_frame_types_and_subtypes_reference)
-[]: # - [IEEE 802.11 Management Frame Types and Subtypes Overview](https://en.wikipedia.org/wiki/Management_frame_types_and_subtypes_overview)
-[]: # - [IEEE 802.11 Management Frame Types and Subtypes Summary](https://en.wikipedia.org/wiki/Management_frame_types_and_subtypes_summary)
-[]: # - [IEEE 802.11 Management Frame Types and Subtypes Explanation](https://en.wikipedia.org/wiki/Management_frame_types_and_subtypes_explanation)
-[]: # - [IEEE 802.11 Management Frame Types and Subtypes Description](https://en.wikipedia.org/wiki/Management_frame_types_and_subtypes_description)
-[]: # - [IEEE 802.11 Management Frame Types and Subtypes Analysis](https://en.wikipedia.org/wiki/Management_frame_types_and_subtypes_analysis)
-[]: # - [IEEE 802.11 Management Frame Types and Subtypes Comparison](https://en.wikipedia.org/wiki/Management_frame_types_and_subtypes_comparison)
-[]: # - [IEEE 802.11 Management Frame Types and Subtypes Classification](https://en.wikipedia.org/wiki/Management_frame_types_and_subtypes_classification)
-[]: # - [IEEE 802.11 Management Frame Types and Subtypes Categorization](https://en.wikipedia.org/wiki/Management_frame_types_and_subtypes_categorization)
-[]: # - [IEEE 802.11 Management Frame Types and Subtypes Identification](https://en.wikipedia.org/wiki/Management_frame_types_and_subtypes_identification)
-[]: # - [IEEE 802.11 Management Frame Types and Subtypes Recognition](https://en.wikipedia.org/wiki/Management_frame_types_and_subtypes_recognition)
-[]: # - [IEEE 802.11 Management Frame Types and Subtypes Detection](https://en.wikipedia.org/wiki/Management_frame_types_and_subtypes_detection)
-[]: # - [IEEE 802.11 Management Frame Types and Subtypes Monitoring](https://en.wikipedia.org/wiki/Management_frame_types_and_subtypes_monitoring)
-[]: # - [IEEE 802.11 Management Frame Types and Subtypes Analysis Tools](https://en.wikipedia.org/wiki/Management_frame_types_and_subtypes_analysis_tools)
-[]: # - [IEEE 802.11 Management Frame Types and Subtypes Analysis Techniques](https://en.wikipedia.org/wiki/Management_frame_types_and_subtypes_analysis_techniques)
-[]: # - [IEEE 802.11 Management Frame Types and Subtypes Analysis Methods](https://en.wikipedia.org/wiki/Management_frame_types_and_subtypes_analysis_methods)
-[]: # - [IEEE 802.11 Management Frame Types and Subtypes Analysis Approaches](https://en.wikipedia.org/wiki/Management_frame_types_and_subtypes_analysis_approaches)
-[]: # - [IEEE 802.11 Management Frame Types and Subtypes Analysis Strategies](https://en.wikipedia.org/wiki/Management_frame_types_and_subtypes_analysis_strategies)
-[]: # - [IEEE 802.11 Management Frame Types and Subtypes Analysis Frameworks](https://en.wikipedia.org/wiki/Management_frame_types_and_subtypes_analysis_frameworks)
-[]: # - [IEEE 802.11 Management Frame Types and Subtypes Analysis Models](https://en.wikipedia.org/wiki/Management_frame_types_and_subtypes_analysis_models)
-[]: # - [IEEE 802.11 Management Frame Types and Subtypes Analysis Systems](https://en.wikipedia.org/wiki/Management_frame_types_and_subtypes_analysis_systems)
-[]: # - [IEEE 802.11 Management Frame Types and Subtypes Analysis Platforms](https://en.wikipedia.org/wiki/Management_frame_types_and_subtypes_analysis_platforms)
-[]: # - [IEEE 802.11 Management Frame Types and Subtypes Analysis Environments](https://en.wikipedia.org/wiki/Management_frame_types_and_subtypes_analysis_environments)
-[]: # - [IEEE 802.11 Management Frame Types and Subtypes Analysis Applications](https://en.wikipedia.org/wiki/Management_frame_types_and_subtypes_analysis_applications)
-[]: # - [IEEE 802.11 Management Frame Types and Subtypes Analysis Tools and Techniques](https://en.wikipedia.org/wiki/Management_frame_types_and_subtypes_analysis_tools_and_techniques)
-[]: # - [IEEE 802.11 Management Frame Types and Subtypes Analysis Tools and Methods](https://en.wikipedia.org/wiki/Management_frame_types_and_subtypes_analysis_tools_and_methods)
-[]: # - [IEEE 802.11 Management Frame Types and Subtypes Analysis Tools and Approaches](https://en.wikipedia.org/wiki/Management_frame_types_and_subtypes_analysis_tools_and_approaches)
-[]: # - [IEEE 802.11 Management Frame Types and Subtypes Analysis Tools and Strategies](https://en.wikipedia.org/wiki/Management_frame_types_and_subtypes_analysis_tools_and_strategies)
-[]: # - [IEEE 802.11 Management Frame Types and Subtypes Analysis Tools and Frameworks](https://en.wikipedia.org/wiki/Management_frame_types_and_subtypes_analysis_tools_and_frameworks)
-[]: # - [IEEE 802.11 Management Frame Types and Subtypes Analysis Tools and Models](https://en.wikipedia.org/wiki/Management_frame_types_and_subtypes_analysis_tools_and_models)
-[]: # - [IEEE 802.11 Management Frame Types and Subtypes Analysis Tools and Systems](https://en.wikipedia.org/wiki/Management_frame_types_and_subtypes_analysis_tools_and_systems)
-[]: # - [IEEE 802.11 Management Frame Types and Subtypes Analysis Tools and Platforms](https://en.wikipedia.org/wiki/Management_frame_types_and_subtypes_analysis_tools_and_platforms)
-[]: # - [IEEE 802.11 Management Frame Types and Subtypes Analysis Tools and Environments](https://en.wikipedia.org/wiki/Management_frame_types_and_subtypes_analysis_tools_and_environments)
-[]: # - [IEEE 802.11 Management Frame Types and Subtypes Analysis Tools and Applications](https://en.wikipedia.org/wiki/Management_frame_types_and_subtypes_analysis_tools_and_applications)
-[]: # - [IEEE 802.11 Management Frame Types and Subtypes Analysis Tools and Techniques Overview](https://en.wikipedia.org/wiki/Management_frame_types_and_subtypes_analysis_tools_and_techniques_overview)
-[]: # - [IEEE 802.11 Management Frame Types and Subtypes Analysis Tools and Methods Overview](https://en.wikipedia.org/wiki/Management_frame_types_and_subtypes_analysis_tools_and_methods_overview)
-[]: # - [IEEE 802.11 Management Frame Types and Subtypes Analysis Tools and Approaches Overview](https://en.wikipedia.org/wiki/Management_frame_types_and_subtypes_analysis_tools_and_approaches_overview)
-[]: # - [IEEE 802.11 Management Frame Types and Subtypes Analysis Tools and Strategies Overview](https://en.wikipedia.org/wiki/Management_frame_types_and_subtypes_analysis_tools_and_strategies_overview)
-[]: # - [IEEE 802.11 Management Frame Types and Subtypes Analysis Tools and Frameworks Overview](https://en.wikipedia.org/wiki/Management_frame_types_and_subtypes_analysis_tools_and_frameworks_overview)
-[]: # - [IEEE 802.11 Management Frame Types and Subtypes Analysis Tools and Models Overview](https://en.wikipedia.org/wiki/Management_frame_types_and_subtypes_analysis_tools_and_models_overview)
-[]: # - [IEEE 802.11 Management Frame Types and Subtypes Analysis Tools and Systems Overview](https://en.wikipedia.org/wiki/Management_frame_types_and_subtypes_analysis_tools_and_systems_overview)
-[]: # - [IEEE 802.11 Management Frame Types and Subtypes Analysis Tools and Platforms Overview](https://en.wikipedia.org/wiki/Management_frame_types_and_subtypes_analysis_tools_and_platforms_overview)
-[]: # - [IEEE 802.11 Management Frame Types and Subtypes Analysis Tools and Environments Overview](https://en.wikipedia.org/wiki/Management_frame_types_and_subtypes_analysis_tools_and_environments_overview)
-[]: # - [IEEE 802.11 Management Frame Types and Subtypes Analysis Tools and Applications Overview](https://en.wikipedia.org/wiki/Management_frame_types_and_subtypes_analysis_tools_and_applications_overview)
-[]: # - [IEEE 802.11 Management Frame Types and Subtypes Analysis Tools and Techniques Summary](https://en.wikipedia.org/wiki/Management_frame_types_and_subtypes_analysis_tools_and_techniques_summary)
-[]: # - [IEEE 802.11 Management Frame Types and Subtypes Analysis Tools and Methods Summary](https://en.wikipedia.org/wiki/Management_frame_types_and_subtypes_analysis_tools_and_methods_summary)
-[]: # - [IEEE 802.11 Management Frame Types and Subtypes Analysis Tools and Approaches Summary](https://en.wikipedia.org/wiki/Management_frame_types_and_subtypes_analysis_tools_and_approaches_summary)
-[]: # - [IEEE 802.11 Management Frame Types and Subtypes Analysis Tools and Strategies Summary](https://en.wikipedia.org/wiki/Management_frame_types_and_subtypes_analysis_tools_and_strategies_summary)
-[]: # - [IEEE 802.11 Management Frame Types and Subtypes Analysis Tools and Frameworks Summary](https://en.wikipedia.org/wiki/Management_frame_types_and_subtypes_analysis_tools_and_frameworks_summary)
-[]: # - [IEEE 802.11 Management Frame Types and Subtypes Analysis Tools and Models Summary](https://en.wikipedia.org/wiki/Management_frame_types_and_subtypes_analysis_tools_and_models_summary)
-[]: # - [IEEE 802.11 Management Frame Types and Subtypes Analysis Tools and Systems Summary](https://en.wikipedia.org/wiki/Management_frame_types_and_subtypes_analysis_tools_and_systems_summary)
-[]: # - [IEEE 802.11 Management Frame Types and Subtypes Analysis Tools and Platforms Summary](https://en.wikipedia.org/wiki/Management_frame_types_and_subtypes_analysis_tools_and_platforms_summary)
-[]: # - [IEEE 802.11 Management Frame Types and Subtypes Analysis Tools and Environments Summary](https://en.wikipedia.org/wiki/Management_frame_types_and_subtypes_analysis_tools_and_environments_summary)
-[]: # - [IEEE 802.11 Management Frame Types and Subtypes Analysis Tools and Applications Summary](https://en.wikipedia.org/wiki/Management_frame_types_and_subtypes_analysis_tools_and_applications_summary)
-[]: # - [IEEE 802.11 Management Frame Types and Subtypes Analysis Tools and Techniques Explanation](https://en.wikipedia.org/wiki/Management_frame_types_and_subtypes_analysis_tools_and_techniques_explanation)
-[]: # - [IEEE 802.11 Management Frame Types and Subtypes Analysis Tools and Methods Explanation](https://en.wikipedia.org/wiki/Management_frame_types_and_subtypes_analysis_tools_and_methods_explanation)
-[]: # - [IEEE 802.11 Management Frame Types and Subtypes Analysis Tools and Approaches Explanation](https://en.wikipedia.org/wiki/Management_frame_types_and_subtypes_analysis_tools_and_approaches_explanation)
-[]: # - [IEEE 802.11 Management Frame Types and Subtypes Analysis Tools and Strategies Explanation](https://en.wikipedia.org/wiki/Management_frame_types_and_subtypes_analysis_tools_and_strategies_explanation)
-[]: # - [IEEE 802.11 Management Frame Types and Subtypes Analysis Tools and Frameworks Explanation](https://en.wikipedia.org/wiki/Management_frame_types_and_subtypes_analysis_tools_and_frameworks_explanation)
-[]: # - [IEEE 802.11 Management Frame Types and Subtypes Analysis Tools and Models Explanation](https://en.wikipedia.org/wiki/Management_frame_types_and_subtypes_analysis_tools_and_models_explanation)
-[]: # - [IEEE 802.11 Management Frame Types and Subtypes Analysis Tools and Systems Explanation](https://en.wikipedia.org/wiki/Management_frame_types_and_subtypes_analysis_tools_and_systems_explanation)
-[]: # - [IEEE 802.11 Management Frame Types and Subtypes Analysis Tools and Platforms Explanation](https://en.wikipedia.org/wiki/Management_frame_types_and_subtypes_analysis_tools_and_platforms_explanation)
-[]: # - [IEEE 802.11 Management Frame Types and Subtypes Analysis Tools and Environments Explanation](https://en.wikipedia.org/wiki/Management_frame_types_and_subtypes_analysis_tools_and_environments_explanation)
-[]: # - [IEEE 802.11 Management Frame Types and Subtypes Analysis Tools and Applications Explanation](https://en.wikipedia.org/wiki/Management_frame_types_and_subtypes_analysis_tools_and_applications_explanation)
+
+## Packet Capture Examples
+
+To analyze and verify the frame structures, you can use Wireshark with an ESP8266 in monitor mode. Here are example captures for each frame type:
+
+### Association Request Capture
+```
+Frame 1234 (54 bytes on wire, 54 bytes captured)
+IEEE 802.11 Association Request, Flags: ....
+    Type/Subtype: Association Request (0x00)
+    Frame Control: 0x0000
+    Duration: 0
+    Destination: Broadcast (ff:ff:ff:ff:ff:ff)
+    Source: xx:xx:xx:xx:xx:xx
+    BSS Id: xx:xx:xx:xx:xx:xx
+    Fragment number: 0
+    Sequence number: 1234
+    Frame check sequence: 0x12345678
+    Capability Information: 0x0411
+    Listen Interval: 10
+    Tagged parameters:
+        SSID: "Test Network"
+        Supported rates: 1.0 2.0 5.5 11.0 6.0 9.0 12.0 18.0 Mbps
+```
+
+For more packet capture examples and analysis, refer to the [Wireshark Wiki](https://wiki.wireshark.org/IEEE_802.11).
