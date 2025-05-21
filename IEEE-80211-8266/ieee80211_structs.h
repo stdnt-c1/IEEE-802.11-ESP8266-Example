@@ -4,9 +4,17 @@
 #include <stdint.h>
 #include <ESP8266WiFi.h>
 
+// Function declarations
+void log_channel_hop(uint8_t new_channel, bool success, const char* reason = nullptr);
+
 // Forward declaration of ESP8266 SDK function
 extern "C" {
     int8_t system_get_rssi(void);
+}
+
+// Forward declare SSL error handling function
+extern "C" ICACHE_RAM_ATTR int32_t ssl_error_handle(const char* msg) {
+    return -1;  // Default error handler
 }
 
 // Frame type and subtype definitions
@@ -20,10 +28,9 @@ extern "C" {
 #define IEEE80211_SUBTYPE_DISASSOC     0x0A
 #define IEEE80211_SUBTYPE_DEAUTH       0x0C
 
-// External declarations
-extern uint16_t sequence_number;
-extern uint8_t channel_scan;
-extern uint16_t sequence_number;
+// External declarations - aligned for memory access
+extern uint16_t sequence_number __attribute__((aligned(4)));
+extern uint8_t channel_scan __attribute__((aligned(4)));
 
 // ESP8266 SDK specific definitions
 #ifndef ETS_WDEV_INTR_DISABLE
@@ -42,15 +49,86 @@ extern uint16_t sequence_number;
 #define WIFI_CHANNEL_MAX 14
 extern uint8_t channel_scan;
 
-// Forward declarations of main functions
-uint16_t build_beacon_packet(uint8_t* buffer, const uint8_t* bssid, const char* ssid, uint8_t channel);
-uint16_t build_deauth_packet(uint8_t* buffer, const uint8_t* dst, const uint8_t* src, const uint8_t* bssid, uint16_t reason);
-uint16_t build_disassoc_packet(uint8_t* buffer, const uint8_t* dst, const uint8_t* src, const uint8_t* bssid, uint16_t reason);
-uint16_t build_association_packet(uint8_t* buffer, const uint8_t* dst_addr, const uint8_t* src_addr, const char* ssid, uint8_t channel);
+// Channel statistics for adaptive hopping
+struct ChannelStats {
+    uint32_t last_success __attribute__((aligned(4)));    // Timestamp of last successful transmission
+    uint32_t status __attribute__((aligned(4)));          // Packed status: fail_count(8) | busy_count(8) | blacklisted(1)
+
+    // Member functions for atomic operations
+    ICACHE_RAM_ATTR inline void incrementFailCount() {
+        uint32_t old_status;
+        do {
+            old_status = status;
+            uint8_t fail_count = (old_status >> 16) & 0xFF;
+            if (fail_count < 255) fail_count++;
+            uint32_t new_status = (old_status & 0x0000FFFF) | (fail_count << 16);
+            asm volatile ("rsil a15, 1\n\t"
+                         "s32i %0, %1, 0\n\t"
+                         "rsil a15, 0"
+                         :
+                         : "r" (new_status), "r" (&status)
+                         : "a15", "memory");
+        } while (status != old_status);
+    }
+
+    ICACHE_RAM_ATTR inline void resetFailCount() {
+        uint32_t old_status;
+        do {
+            old_status = status;
+            uint32_t new_status = old_status & 0x0000FFFF;
+            asm volatile ("rsil a15, 1\n\t"
+                         "s32i %0, %1, 0\n\t"
+                         "rsil a15, 0"
+                         :
+                         : "r" (new_status), "r" (&status)
+                         : "a15", "memory");
+        } while (status != old_status);
+    }
+
+    ICACHE_RAM_ATTR inline void setBlacklisted(bool value) {
+        uint32_t old_status;
+        do {
+            old_status = status;
+            uint32_t new_status = (old_status & 0xFFFFFFFE) | (value ? 1 : 0);
+            asm volatile ("rsil a15, 1\n\t"
+                         "s32i %0, %1, 0\n\t"
+                         "rsil a15, 0"
+                         :
+                         : "r" (new_status), "r" (&status)
+                         : "a15", "memory");
+        } while (status != old_status);
+    }
+
+    ICACHE_RAM_ATTR inline bool isBlacklisted() const {
+        return (status & 0x01) != 0;
+    }
+};
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+extern ChannelStats channel_stats[WIFI_CHANNEL_MAX + 1];
+
+// Function declarations for packet building
+
+ICACHE_RAM_ATTR uint16_t build_beacon_packet(uint8_t* buffer, const uint8_t* bssid, const char* ssid, uint8_t channel);
+ICACHE_RAM_ATTR uint16_t build_deauth_packet(uint8_t* buffer, const uint8_t* dst, const uint8_t* src, const uint8_t* bssid, uint16_t reason);
+ICACHE_RAM_ATTR uint16_t build_disassoc_packet(uint8_t* buffer, const uint8_t* dst, const uint8_t* src, const uint8_t* bssid, uint16_t reason);
+ICACHE_RAM_ATTR uint16_t build_association_packet(uint8_t* buffer, const uint8_t* dst_addr, const uint8_t* src_addr, const char* ssid, uint8_t channel);
+
+#ifdef __cplusplus
+}
+#endif
 
 // RSSI helper function declaration
-static inline int8_t wifi_get_channel_rssi(void) {
-    return (int8_t)WiFi.RSSI();
+ICACHE_RAM_ATTR static inline int8_t wifi_get_channel_rssi(void) {
+    static int8_t last_rssi = 0;
+    int8_t current = (int8_t)WiFi.RSSI();
+    if (current != 0) {
+        last_rssi = current;
+    }
+    return last_rssi;
 }
 
 // Frame type and subtype definitions
@@ -91,6 +169,10 @@ static inline int8_t wifi_get_channel_rssi(void) {
 #define IEEE80211_ELEMID_COUNTRY           7
 #define IEEE80211_ELEMID_EXT_SUPP_RATES    50
 #define IEEE80211_ELEMID_HT_CAP           45
+
+// Buffer alignment and max packet size
+#define BUFFER_ALIGNMENT 4     // Required alignment for ESP8266 DMA
+#define MAX_PACKET_SIZE 512    // Maximum packet size
 
 /**
  * IEEE 802.11 Frame Control field structure (bitfield, packed)
@@ -171,33 +253,41 @@ extern "C" {
 /**
  * Initialize a management frame header
  */
-static inline void init_mgmt_frame_header(ieee80211_mac_header_t* hdr, 
+ICACHE_RAM_ATTR static inline void init_mgmt_frame_header(ieee80211_mac_header_t* hdr, 
                                         uint8_t subtype,
                                         const uint8_t* addr1,
                                         const uint8_t* addr2,
                                         const uint8_t* addr3) {
-    hdr->frame_ctrl.protocol_version = 0;
+    if (!hdr || !addr1 || !addr2 || !addr3) return;
+
+    // Frame Control Field
+    hdr->frame_ctrl.protocol_version = 0;  // Always 0 for current 802.11
     hdr->frame_ctrl.type = IEEE80211_TYPE_MANAGEMENT;
     hdr->frame_ctrl.subtype = subtype;
-    hdr->frame_ctrl.to_ds = 0;
-    hdr->frame_ctrl.from_ds = 0;
+    hdr->frame_ctrl.to_ds = 0;    // Management frames never use DS
+    hdr->frame_ctrl.from_ds = 0;  // Management frames never use DS
     hdr->frame_ctrl.more_frag = 0;
     hdr->frame_ctrl.retry = 0;
     hdr->frame_ctrl.power_mgmt = 0;
     hdr->frame_ctrl.more_data = 0;
-    hdr->frame_ctrl.protected_frame = 0;
+    hdr->frame_ctrl.protected_frame = 0;  // No encryption for management frames
     hdr->frame_ctrl.order = 0;
+
+    // Duration/ID field - typically 0 for management frames
     hdr->duration_id = 0;
-    
-    if (addr1) memcpy(hdr->addr1, addr1, 6);
-    if (addr2) memcpy(hdr->addr2, addr2, 6);
-    if (addr3) memcpy(hdr->addr3, addr3, 6);
+
+    // MAC addresses - must be properly aligned
+    memcpy(hdr->addr1, addr1, 6);  // Destination
+    memcpy(hdr->addr2, addr2, 6);  // Source
+    memcpy(hdr->addr3, addr3, 6);  // BSSID
+
+    // Let sequence control be handled by caller
 }
 
 /**
  * Add a tagged parameter to a buffer
  */
-static inline uint16_t add_tagged_param(uint8_t* buffer, 
+ICACHE_RAM_ATTR static inline uint16_t add_tagged_param(uint8_t* buffer, 
                                       uint8_t element_id,
                                       uint8_t length,
                                       const uint8_t* data) {
@@ -209,8 +299,85 @@ static inline uint16_t add_tagged_param(uint8_t* buffer,
     return length + 2;
 }
 
-#ifdef __cplusplus
+// Frame validation helper functions
+ICACHE_RAM_ATTR static inline bool validate_mac_frame(const ieee80211_mac_header_t* hdr,
+                                                    uint8_t expected_type,
+                                                    uint8_t expected_subtype) {
+    if (!hdr) return false;
+
+    // Check protocol version (must be 0 for current 802.11)
+    if (hdr->frame_ctrl.protocol_version != 0) return false;
+
+    // Verify frame type and subtype
+    if (hdr->frame_ctrl.type != expected_type ||
+        hdr->frame_ctrl.subtype != expected_subtype) return false;
+
+    // Management frames should not use distribution system
+    if (expected_type == IEEE80211_TYPE_MANAGEMENT &&
+        (hdr->frame_ctrl.to_ds || hdr->frame_ctrl.from_ds)) return false;
+
+    return true;
 }
+
+ICACHE_RAM_ATTR static inline bool validate_tagged_params(const uint8_t* buffer,
+                                                        uint16_t length,
+                                                        uint16_t offset) {
+    while (offset < length - 2) {  // Need at least element ID and length
+        uint8_t id = buffer[offset];
+        uint8_t len = buffer[offset + 1];
+        
+        // Check if parameter extends beyond packet
+        if (offset + 2 + len > length) return false;
+        
+        // Move to next parameter
+        offset += 2 + len;
+    }
+    return true;
+}
+
+ICACHE_RAM_ATTR static inline bool validate_reason_code(uint16_t reason, bool is_deauth) {
+    if (reason == 0) return false;
+    
+    if (is_deauth) {
+        // Deauthentication reason codes: 1-36
+        return reason <= 0x0024;
+    } else {
+        // Disassociation reason codes: 1-8
+        return reason <= 0x0008;
+    }
+}
+
+// Channel management helper functions
+// Channel helper functions
+ICACHE_RAM_ATTR static inline bool wifi_set_safe_channel(uint8_t channel) {
+    if (channel < 1 || channel > 14) {
+        log_channel_hop(channel, false, "Invalid channel");
+        return false;
+    }
+    bool success = wifi_set_channel(channel);
+    if (success) {
+        delayMicroseconds(500);  // Let channel switch settle
+        system_soft_wdt_feed();  // Feed watchdog during channel switch
+        log_channel_hop(channel, true);
+    } else {
+        log_channel_hop(channel, false, "Channel switch failed");
+    }
+    return success;
+}
+
+#ifdef __cplusplus
+}  // extern "C"
 #endif
+
+// Get debug information about channel stats
+ICACHE_RAM_ATTR static inline void get_channel_stats_debug(uint8_t channel, 
+                                                         uint8_t& fail_count, 
+                                                         uint8_t& busy_count, 
+                                                         bool& blacklisted) {
+    uint32_t status = channel_stats[channel].status;
+    fail_count = (status >> 16) & 0xFF;
+    busy_count = (status >> 8) & 0xFF;
+    blacklisted = (status & 0x01) != 0;
+}
 
 #endif // IEEE80211_STRUCTS_H
