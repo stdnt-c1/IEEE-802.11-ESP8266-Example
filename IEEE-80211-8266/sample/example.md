@@ -1,14 +1,6 @@
 # IEEE 802.11 Management Frame Structure Examples
 
-This project implements IEEE 802.11 management frames in compliance with the IEEE 802.11-2016 standard. The following frame types are supported:
-
-- Association Request
-- Beacon
-- Deauthentication
-- Disassociation
-
-## Compliance Note
-The implementation adheres to the IEEE 802.11-2016 standard, ensuring proper frame structure, field initialization, and tagged parameter handling. All frame types are validated for compliance with the standard before transmission.
+This document provides annotated code and explanations for the construction of major IEEE 802.11 management frames as implemented in this project. Each example references the relevant section of the IEEE 802.11-2016 standard and explains the purpose of each field and element.
 
 ## General Frame Structure
 All management frames follow this basic structure:
