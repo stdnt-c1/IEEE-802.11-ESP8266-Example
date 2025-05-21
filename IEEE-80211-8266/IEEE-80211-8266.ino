@@ -1,42 +1,46 @@
+#include <Arduino.h>
+#include <ESP8266WiFi.h>
+#include <user_interface.h>
+
+// ESP8266 SDK function declarations
+extern "C" {
+    void ets_delay_us(uint32_t us);
+    void system_soft_wdt_feed(void);
+    
+    #ifndef ICACHE_RAM_ATTR
+    #define ICACHE_RAM_ATTR __attribute__((section(".iram.text")))
+    #endif
+}
+
+#include "ieee80211_structs.h"
 
 /**
  * ESP8266 Raw 802.11 Management Frame Transmission
- *
- * This sketch demonstrates how to craft and transmit raw IEEE 802.11 management frames
- * (Association Request, Beacon, Deauthentication, Disassociation) using low-level access
- * to the ESP8266 WiFi hardware.
- *
- * Standards and References:
- *   - IEEE Std 802.11-2016 (Revision of IEEE Std 802.11-2012):
- *     https://standards.ieee.org/standard/802_11-2016.html
- *   - IEEE 802.11 Layering: This code operates at the Data Link Layer (Layer 2, MAC sublayer)
- *     and constructs 802.11 MAC frames directly, bypassing higher-level WiFi stacks.
- *
- * Frame Type References:
- *   - Association Request:
- *       - IEEE 802.11-2016, Section 9.3.3.6 (Association Request frame format)
- *   - Beacon:
- *       - IEEE 802.11-2016, Section 9.3.3.1 (Beacon frame format)
- *   - Deauthentication:
- *       - IEEE 802.11-2016, Section 9.3.3.12 (Deauthentication frame format)
- *   - Disassociation:
- *       - IEEE 802.11-2016, Section 9.3.3.11 (Disassociation frame format)
- *
- * Additional references:
- *   - IEEE 802.11 Management Frames: https://en.wikipedia.org/wiki/802.11_Frame_Types
- *   - Wireshark 802.11 Frame Dissection: https://www.wireshark.org/docs/wsug_html_chunked/ChAdvDisplayFilterSection.html
- *
- * WARNING: This bypasses normal WiFi protocols and should only be used for educational and research purposes.
- * Transmitting unauthorized packets may violate regulations in your region.
+ * 
+ * This sketch demonstrates crafting and transmitting raw IEEE 802.11 management frames using 
+ * ESP8266's low-level WiFi capabilities. Implements:
+ * - Association Request frames
+ * - Beacon frames
+ * - Deauthentication frames
+ * - Disassociation frames
+ * 
+ * WARNING: This code bypasses normal WiFi protocols and should ONLY be used for:
+ * - Educational purposes
+ * - Network security research
+ * - Protocol analysis
+ * 
+ * IMPORTANT: Transmitting unauthorized packets may violate regulations in your region.
+ * Always ensure compliance with local laws and regulations.
  */
 
-extern "C" {
-  #include "user_interface.h"
-  #include "espnow.h"
-  #include "ieee80211_structs.h"
-  #include "ets_sys.h"
-}
+// Global variables for frame management
+uint16_t sequence_number = 0;
 
+// Replace esp_random with ESP equivalent
+#define esp_random() (*(volatile uint32_t*)0x3FF20E44)
+
+// Global MAC addresses and channel
+uint8_t wifi_channel = 1;
 
 // Target AP MAC Address (replace with your target)
 uint8_t target_mac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};  // Broadcast address
@@ -45,7 +49,6 @@ uint8_t source_mac[6] = {0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC};
 
 // Default SSID and channel
 char ssid[33] = "TestNetwork";
-uint8_t wifi_channel = 1;
 
 // Frame type selection
 enum FrameType {
@@ -184,14 +187,11 @@ uint16_t build_disassoc_packet(uint8_t* buffer, const uint8_t* dst, const uint8_
   return pos;
 }
 
-// Sequence number for 802.11 frames
-static uint16_t sequence_number = 0;
+// Global variables
+uint8_t channel_scan = 1;
 
 // Memory aligned buffer for packet construction (aligned for DMA operations)
 ICACHE_RAM_ATTR uint8_t packet_buffer[512] __attribute__((aligned(4)));
-
-// Pre-declare WiFi channel
-uint8_t wifi_channel = 1;
 
 // Debug flag
 bool debug_mode = true;
@@ -216,55 +216,6 @@ enum HoppingStrategy {
     ADAPTIVE,        // Based on success rate
     RANDOM          // Random channel selection
 } hopping_strategy = ADAPTIVE;
-
-/**
- * IEEE 802.11 Frame Control field structure
- * This must be byte-precise according to the standard
- */
-typedef struct {  uint8_t protocol_version:2;
-  uint8_t type:2;
-  uint8_t subtype:4;
-  uint8_t to_ds:1;
-  uint8_t from_ds:1;
-  uint8_t more_frag:1;
-  uint8_t retry:1;
-  uint8_t power_mgmt:1;
-  uint8_t more_data:1;
-  uint8_t protected_frame:1;
-  uint8_t order:1;
-  
-  // Helper functions to properly set frame control bits
-  void setManagementFrame() {
-    type = 0;  // Management frame type
-    to_ds = 0;
-    from_ds = 0;
-  }
-  
-  void setAssociationRequest() {
-    setManagementFrame();
-    subtype = 0;  // Association Request subtype
-  }
-} __attribute__((packed)) frame_control_t;
-
-/**
- * IEEE 802.11 MAC Header structure
- */
-typedef struct {
-  frame_control_t frame_ctrl;
-  uint16_t duration_id;
-  uint8_t addr1[6];  // Receiver Address
-  uint8_t addr2[6];  // Transmitter Address
-  uint8_t addr3[6];  // Destination Address or BSSID
-  uint16_t seq_ctrl;
-} __attribute__((packed)) ieee80211_mac_header_t;
-
-/**
- * IEEE 802.11 Association Request Fixed Parameters
- */
-typedef struct {
-  uint16_t capability_info;
-  uint16_t listen_interval;
-} __attribute__((packed)) assoc_fixed_params_t;
 
 /**
  * Interpret transmission status codes
@@ -402,7 +353,6 @@ uint16_t build_association_packet(uint8_t* buffer, const uint8_t* dst_addr,
   buffer[pos++] = 0x00; buffer[pos++] = 0x00;
   buffer[pos++] = 0x00; buffer[pos++] = 0x00;
   buffer[pos++] = 0x00; buffer[pos++] = 0x00;
-  buffer[pos++] = 0x00; buffer[pos++] = 0x00;
   // HT Extended Capabilities
   buffer[pos++] = 0x00; buffer[pos++] = 0x00;
   // Transmit Beamforming Capabilities
@@ -441,80 +391,37 @@ uint16_t build_association_packet(uint8_t* buffer, const uint8_t* dst_addr,
  * @param channel WiFi channel to transmit on (1-14)
  */
 ICACHE_RAM_ATTR bool transmit_raw_packet(const uint8_t* packet, uint16_t length, uint8_t rate, uint8_t channel) {
-  // Save current interrupt state
-  uint32_t old_int_state = ets_intr_lock();
+  if (!packet || length == 0 || length > 1500) return false;
   
-  // Store current op_mode and switch to STATION_MODE
+  // Save current state and disable interrupts
   uint8_t old_op_mode = wifi_get_opmode();
-  wifi_set_opmode(STATION_MODE);
-  
-  // Set the channel
-  wifi_set_channel(channel);
-  
-  // Wait a moment for channel to settle
-  os_delay_us(1000);
-  
-  // Disable interrupts to ensure atomic operation
-  ETS_UART_INTR_DISABLE();
-  ETS_FRC_TIMER1_INTR_DISABLE();
-  ETS_WDEV_INTR_DISABLE();
-  
-  // Using SDK function for raw transmission if available
-  bool result = false;
-  
-  // Must add 4 bytes to length for FCS that hardware will add
-  result = wifi_send_pkt_freedom(packet, length, 0) == 0;
-  
-  if (!result) {
-    // If SDK function fails, fall back to direct hardware access
-    // Note: This is highly specific to ESP8266 hardware and may not work on all versions
+  noInterrupts();
 
-    // Base address of the wifi controller
-    volatile uint32_t* wifi_control = (volatile uint32_t*)0x60000200;
-    
-    // Set up transmission parameters - these registers are from reverse engineering
-    *(volatile uint32_t*)(0x60000900) = 0x00000000;   // Clear transmission status
-    *(volatile uint32_t*)(0x60000904) = length;       // Set packet length
-    *(volatile uint32_t*)(0x60000908) = rate;         // Set transmission rate
-    *(volatile uint32_t*)(0x6000090C) = channel;      // Set channel
-    *(volatile uint32_t*)(0x60000910) = 0x00000000;   // Set normal transmission (not continuous)
-    
-    // Copy packet to transmission buffer (careful with alignment)
-    volatile uint32_t* tx_buffer = (volatile uint32_t*)(0x60000B00);
-    uint32_t words = (length + 3) / 4;  // Round up to whole words
-    
-    for (uint32_t i = 0; i < words; i++) {
-      uint32_t word = 0;
-      for (int j = 0; j < 4 && (i*4+j) < length; j++) {
-        word |= ((uint32_t)packet[i*4+j]) << (j*8);
-      }
-      tx_buffer[i] = word;
-    }
-    
-    // Trigger transmission
-    *(volatile uint32_t*)(0x60000914) = 0x00000001;
-    
-    // Wait for transmission to complete (with timeout)
-    uint32_t timeout = 1000;  // 1ms timeout
-    while (timeout--) {
-      if (*(volatile uint32_t*)(0x60000900) & 0x00000001) {
-        result = true;
-        break;
-      }
-      os_delay_us(1);
-    }
+  // Switch to station mode and set channel
+  wifi_set_opmode(STATION_MODE);
+  if (!wifi_set_channel((uint8)channel)) {
+    interrupts();
+    return false;
   }
   
-  // Re-enable interrupts
-  ETS_WDEV_INTR_ENABLE();
-  ETS_FRC_TIMER1_INTR_ENABLE();
-  ETS_UART_INTR_ENABLE();
+  // Wait for channel switch and feed watchdog
+  os_delay_us(1000);
+  system_soft_wdt_feed();
   
-  // Restore previous WiFi mode
+  // Prepare packet for transmission
+  bool result = false;
+  
+  // Create a non-const buffer for wifi_send_pkt_freedom
+  uint8* tx_buffer = (uint8*)malloc(length);
+  if (tx_buffer) {
+    memcpy(tx_buffer, packet, length);
+    result = wifi_send_pkt_freedom(tx_buffer, (int)length, false) == 0;
+    free(tx_buffer);
+  }
+  
+  // Restore previous mode and re-enable interrupts
   wifi_set_opmode(old_op_mode);
-  
-  // Restore previous interrupt state
-  ets_intr_unlock(old_int_state);
+  interrupts();
   
   return result;
 }
@@ -611,14 +518,13 @@ void print_packet_details(const uint8_t* packet, uint16_t length) {
 }
 
 uint8_t next_channel(uint8_t current_channel) {
+    uint8_t best_channel = current_channel;
+    uint8_t lowest_fails = 255;
+    uint8_t new_channel = current_channel;
+
     switch(hopping_strategy) {
         case SEQUENTIAL:
             return (current_channel >= MAX_CHANNEL) ? MIN_CHANNEL : current_channel + 1;
-            
-        case ADAPTIVE:
-            // Try to find the channel with least failures and not blacklisted
-            uint8_t best_channel = current_channel;
-            uint8_t lowest_fails = 255;
             
             for(uint8_t ch = MIN_CHANNEL; ch <= MAX_CHANNEL; ch++) {
                 if(!channel_stats[ch].blacklisted && 
@@ -666,10 +572,15 @@ void update_channel_stats(uint8_t channel, bool success) {
 
 bool is_channel_clear(uint8_t channel) {
     // Check if channel is free using RSSI
-    int8_t rssi = wifi_get_channel_rssi();
-    const int8_t RSSI_THRESHOLD = -65;  // Adjust based on environment
+    int32_t rssi = WiFi.RSSI();
+    const int32_t RSSI_THRESHOLD = -65;  // Adjust based on environment
     
-    if(rssi > RSSI_THRESHOLD) {
+    if (rssi == 0) {
+        // RSSI not available, assume channel is clear
+        return true;
+    }
+    
+    if (rssi > RSSI_THRESHOLD) {
         channel_stats[channel].busy_count++;
         return false;
     }
@@ -723,14 +634,15 @@ bool perform_channel_hop(uint8_t& current_channel) {
     
     while (!found_clear_channel && retry_count < MAX_RETRIES) {
         uint8_t next_ch = next_channel(current_channel);
-        wifi_set_channel(next_ch);
-        delayMicroseconds(500); // Let channel settle
-        
-        if (is_channel_clear(next_ch)) {
-            current_channel = next_ch;
-            found_clear_channel = true;
-            retry_count = 0;
-            break;
+        if (wifi_set_channel((uint8)next_ch)) {
+            delayMicroseconds(500); // Let channel settle
+            
+            if (is_channel_clear(next_ch)) {
+                current_channel = next_ch;
+                found_clear_channel = true;
+                retry_count = 0;
+                break;
+            }
         }
         
         retry_count++;
@@ -902,14 +814,14 @@ void loop() {
   
   // Update channel hopping strategy based on conditions
   update_channel_strategy();
-    // Channel hopping timing
+  // Channel hopping timing
   if (now - last_hop >= DWELL_TIME) {
-    bool clear_channel = perform_channel_hop(current_channel);
+    bool clear_channel = perform_channel_hop(wifi_channel);
     last_hop = now;
     
     if (debug_mode) {
       Serial.printf("Hopped to channel %d (Channel %s)\n", 
-                   current_channel,
+                   wifi_channel,
                    clear_channel ? "clear" : "busy");
     }
   }
@@ -937,9 +849,26 @@ void loop() {
     Serial.printf("Transmission %s: %s\n", 
                  tx_result ? "successful" : "failed",
                  get_tx_status_string(status));
-    
-    if (debug_mode) {
-      print_packet_details(packet_buffer, packet_size);
+      if (debug_mode && tx_result) {
+      uint16_t dbg_packet_size = 0;
+      switch (selected_frame) {
+        case FRAME_BEACON:
+          dbg_packet_size = build_beacon_packet(beacon_buffer, source_mac, ssid, current_channel);
+          print_packet_details(beacon_buffer, dbg_packet_size);
+          break;
+        case FRAME_DEAUTH:
+          dbg_packet_size = build_deauth_packet(deauth_buffer, target_mac, source_mac, target_mac, reason_code);
+          print_packet_details(deauth_buffer, dbg_packet_size);
+          break;
+        case FRAME_DISASSOC:
+          dbg_packet_size = build_disassoc_packet(disassoc_buffer, target_mac, source_mac, target_mac, reason_code);
+          print_packet_details(disassoc_buffer, dbg_packet_size);
+          break;
+        default:
+          dbg_packet_size = build_association_packet(packet_buffer, target_mac, source_mac, ssid, current_channel);
+          print_packet_details(packet_buffer, dbg_packet_size);
+          break;
+      }
     }
     
     // Channel hopping
@@ -947,10 +876,28 @@ void loop() {
     last_tx = now;
   }
   
-
-  // Handle serial commands with enhanced command system
+  // Handle serial commands
   if (Serial.available()) {
     char cmd = Serial.read();
+    uint16_t packet_size = 0;
+    
+    // Frame type selection helper
+    auto select_frame_type = [&]() {
+      Serial.println("Select frame type:");
+      Serial.println("0 - Association Request");
+      Serial.println("1 - Beacon");
+      Serial.println("2 - Deauthentication");
+      Serial.println("3 - Disassociation");
+      while (!Serial.available());
+      char ftype = Serial.read();
+      if (ftype >= '0' && ftype <= '3') {
+        selected_frame = (FrameType)(ftype - '0');
+        Serial.printf("Frame type set to %d\n", selected_frame);
+      } else {
+        Serial.println("Invalid frame type");
+      }
+    };
+    
     switch(cmd) {
       case 't': // Trigger single transmission
         {
@@ -1041,22 +988,8 @@ void loop() {
             Serial.println("Invalid MAC address format");
           }
         }
-        break;
-
-      case 'f': // Select frame type
-        Serial.println("Select frame type:");
-        Serial.println("0 - Association Request");
-        Serial.println("1 - Beacon");
-        Serial.println("2 - Deauthentication");
-        Serial.println("3 - Disassociation");
-        while (!Serial.available());
-        char ftype = Serial.read();
-        if (ftype >= '0' && ftype <= '3') {
-          selected_frame = (FrameType)(ftype - '0');
-          Serial.printf("Frame type set to %d\n", selected_frame);
-        } else {
-          Serial.println("Invalid frame type");
-        }
+        break;      case 'f': // Select frame type
+        select_frame_type();
         break;
 
       case 'n': // Set SSID
@@ -1091,6 +1024,6 @@ void loop() {
         break;
     }
   }
-  
-  delay(10);  // Prevent watchdog reset
+    // Handle serial buffer and yield CPU
+  yield();
 }

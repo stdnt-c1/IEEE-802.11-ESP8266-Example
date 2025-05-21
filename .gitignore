@@ -11,6 +11,9 @@ build/
 .idea/
 *.iml
 
+# Patches
+*.txt
+
 # OS specific files
 .DS_Store
 Thumbs.db
