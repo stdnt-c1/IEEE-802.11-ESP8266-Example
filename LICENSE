@@ -1,0 +1,26 @@
+# Educational Use License
+
+Copyright (c) 2025 stdnt-c1
+
+This software and associated documentation files (the "Software") are provided for educational and research purposes only. By using this Software, you agree to the following conditions:
+
+1. The Software may only be used for educational and research purposes.
+2. Any use of the Software must comply with all local laws and regulations.
+3. You may not use the Software for any malicious or harmful purposes.
+4. The Software is provided "AS IS", without warranty of any kind.
+5. The authors are not liable for any damages arising from the use of this Software.
+
+## Usage Requirements
+
+1. You must own or have explicit permission to test on any networks or devices.
+2. You must comply with all applicable laws regarding wireless transmissions.
+3. You must use this software responsibly and ethically.
+
+## Attribution
+
+If you use this Software in your research or educational materials, please provide attribution to:
+
+```
+IEEE 802.11 Management Frame Toolkit for ESP8266
+https://github.com/stdnt-c1/IEEE-802.11-ESP8266-Example
+```

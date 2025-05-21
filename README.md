@@ -7,6 +7,7 @@
     <img src="https://img.shields.io/badge/License-Educational%20%7C%20Research-important.svg" alt="License">
     <img src="https://img.shields.io/badge/Status-Active-brightgreen.svg" alt="Status">
     <img src="https://img.shields.io/badge/Frames-Beacon%20%7C%20Assoc%20Req%20%7C%20Deauth%20%7C%20Disassoc-orange.svg" alt="Frames">
+    <img src="https://img.shields.io/badge/Last%20Updated-May%202025-yellow.svg" alt="Last Updated">
   </p>
 </div>
 
@@ -117,5 +118,21 @@ These headers are included in the [ESP8266 RTOS SDK](https://github.com/espressi
 - [Arduino ESP8266 Core](https://github.com/esp8266/Arduino)
 - [Wikipedia: IEEE 802.11 Management Frames](https://en.wikipedia.org/wiki/IEEE_802.11#Management_frames)
 
+
+## 🔧 Development
+
+Project is maintained by [@stdnt-c1](https://github.com/stdnt-c1). Last updated: May 21, 2025.
+
+To contribute or report issues:
+1. Fork the repository
+2. Create a feature branch
+3. Submit a pull request
+
+For bug reports or questions, please open an issue in the GitHub repository.
+
 ---
 **By using this code, you agree to the above terms and accept all responsibility for its use.**
+
+<div align="center">
+  <sub>Built with ❤️ for education and research.</sub>
+</div>

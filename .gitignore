@@ -1,0 +1,23 @@
+# Arduino IDE build files
+*.hex
+*.elf
+*.bin
+
+# Compiled binaries
+build/
+
+# IDE specific files
+.vscode/
+.idea/
+*.iml
+
+# OS specific files
+.DS_Store
+Thumbs.db
+
+# ESP8266 SDK temp files
+*.old
+*.bak
+
+# Build property files
+*.properties
