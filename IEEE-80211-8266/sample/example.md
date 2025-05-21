@@ -1,6 +1,64 @@
 # IEEE 802.11 Management Frame Structure Examples
 
-This document provides annotated code and explanations for the construction of major IEEE 802.11 management frames as implemented in this project. Each example references the relevant section of the IEEE 802.11-2016 standard and explains the purpose of each field and element.
+## Legal Notice and Disclaimer
+
+⚠️ **IMPORTANT SAFETY AND LEGAL WARNINGS** ⚠️
+
+This documentation and associated code are provided for **EDUCATIONAL AND RESEARCH PURPOSES ONLY**. 
+
+**CRITICAL WARNINGS:**
+1. Unauthorized access or interference with networks may be illegal in your jurisdiction
+2. Improper use can disrupt network operations and affect other devices
+3. Users are solely responsible for ensuring compliance with:
+   - Local and national telecommunications laws
+   - Radio frequency regulations
+   - Computer misuse legislation
+   - Network security policies
+   - Terms of service agreements
+
+**LIMITATIONS:**
+- No warranty of fitness for any purpose
+- Authors assume no liability for any damages
+- Use at your own risk
+
+By using this code, you acknowledge these risks and accept full responsibility for compliance.
+
+## Framework Version
+- IEEE 802.11-2016 Standard Implementation
+- ESP8266 Arduino Core 3.1.2 Compatible
+- Last Updated: May 21, 2025
+
+## Command Interface Reference
+
+Available Serial Commands:
+| Command | Description | Example |
+|---------|-------------|----------|
+| t | Trigger single transmission | t |
+| c | Toggle continuous mode | c |
+| d | Toggle debug mode | d |
+| h | Show help menu | h |
+| s | Show current status | s |
+| m | Set target MAC address | m FF:FF:FF:FF:FF:FF |
+| f | Select frame type (0-3) | f |
+| n | Set SSID | n TestNetwork |
+| r | Set reason code | r 0001 |
+| 1-9 | Set WiFi channel (1-9) | 5 |
+
+Status Display Information:
+- Continuous Mode: ON/OFF state
+- Debug Mode: ON/OFF state
+- Current Channel: Active WiFi channel
+- Target MAC: Destination MAC address
+- Source MAC: Origin MAC address
+- SSID: Network name
+- Frame Type: Selected frame type (0-3)
+- Reason Code: Used in deauth/disassoc frames
+
+## Frame Type Reference
+0. Association Request
+1. Beacon
+2. Deauthentication
+3. Disassociation
 
 ## General Frame Structure
 All management frames follow this basic structure:
@@ -26,10 +84,163 @@ All management frames follow this basic structure:
 
 ---
 
-## Association Request Frame
+## Frame Building Details
+
+### Frame Type 0: Association Request
+```cpp
+// Basic structure of an Association Request frame
+[MAC Header: 24 bytes]
+- Frame Control (2 bytes)
+- Duration (2 bytes)
+- Address 1: Destination/BSSID (6 bytes)
+- Address 2: Source (6 bytes)
+- Address 3: BSSID (6 bytes)
+- Sequence Control (2 bytes)
+
+[Fixed Fields: 4 bytes]
+- Capability Information (2 bytes)
+- Listen Interval (2 bytes)
+
+[Tagged Parameters]
+- SSID (Variable)
+- Supported Rates (Variable)
+- Extended Supported Rates (Optional)
+- HT Capabilities (Optional)
+```
+
+### Frame Type 1: Beacon
+```cpp
+// Basic structure of a Beacon frame
+[MAC Header: 24 bytes]
+- Frame Control (2 bytes)
+- Duration (2 bytes)
+- Address 1: Broadcast FF:FF:FF:FF:FF:FF (6 bytes)
+- Address 2: Source/BSSID (6 bytes)
+- Address 3: BSSID (6 bytes)
+- Sequence Control (2 bytes)
+
+[Fixed Fields: 12 bytes]
+- Timestamp (8 bytes)
+- Beacon Interval (2 bytes)
+- Capability Information (2 bytes)
+
+[Tagged Parameters]
+- SSID (Variable)
+- Supported Rates (Variable)
+- DS Parameter Set (3 bytes)
+- TIM (Variable)
+- Country (Variable, Optional)
+```
+
+### Frame Type 2: Deauthentication
+```cpp
+// Basic structure of a Deauthentication frame
+[MAC Header: 24 bytes]
+- Frame Control (2 bytes)
+- Duration (2 bytes)
+- Address 1: Destination (6 bytes)
+- Address 2: Source (6 bytes)
+- Address 3: BSSID (6 bytes)
+- Sequence Control (2 bytes)
+
+[Fixed Fields: 2 bytes]
+- Reason Code (2 bytes)
+
+[Optional]
+- Supported Rates
+```
+
+### Frame Type 3: Disassociation
+```cpp
+// Basic structure of a Disassociation frame
+[MAC Header: 24 bytes]
+- Frame Control (2 bytes)
+- Duration (2 bytes)
+- Address 1: Destination (6 bytes)
+- Address 2: Source (6 bytes)
+- Address 3: BSSID (6 bytes)
+- Sequence Control (2 bytes)
+
+[Fixed Fields: 2 bytes]
+- Reason Code (2 bytes)
+
+[Optional]
+- Supported Rates
+```
+
+## Core Implementation Notes
+
+### Sequence Number Handling
+- 12-bit sequence number (0-4095)
+- Atomic increment operation
+- Wraps around after 4095
+- Used in all frame types
+
+### Channel Management
+- Channel range: 1-14 (region dependent)
+- Dwell time between channel switches
+- RSSI-based clear channel assessment
+- Three hopping strategies:
+  1. Sequential
+  2. Random
+  3. Adaptive (based on channel conditions)
+
+### Frame Control Field Structure
+```cpp
+struct frame_control {
+    uint16_t protocol_version:2;
+    uint16_t type:2;
+    uint16_t subtype:4;
+    uint16_t to_ds:1;
+    uint16_t from_ds:1;
+    uint16_t more_frag:1;
+    uint16_t retry:1;
+    uint16_t power_mgmt:1;
+    uint16_t more_data:1;
+    uint16_t protected_frame:1;
+    uint16_t order:1;
+};
+```
+
+## Core SDK Functions
+```cpp
+// Essential ESP8266 SDK functions used
+wifi_set_channel(uint8 channel)
+wifi_send_pkt_freedom(uint8 *buffer, uint16 len, bool sys_seq)
+system_get_free_heap_size()
+ets_delay_us(uint32_t us)
+```
+
+## Implementation Best Practices
+
+1. Memory Management
+   - Use ICACHE_RAM_ATTR for critical functions
+   - Align buffers to 4-byte boundaries
+   - Pre-allocate fixed-size buffers
+
+2. Timing Considerations
+   - Respect minimum frame spacing
+   - Include proper inter-frame gaps
+   - Monitor and adjust dwell time
+
+3. Error Handling
+   - Track transmission success/failure
+   - Implement retry mechanism
+   - Monitor channel conditions
+
+4. Channel Management
+   - Implement clear channel assessment
+   - Track channel statistics
+   - Adapt hopping strategy
+
+---
+
+## Management Frame Implementations
+
+### Association Request Frame
 **Reference:** IEEE 802.11-2016, Section 9.3.3.6
 
-### Frame Structure
+#### Frame Structure
 
 | Section                             | Details                           |
 |:------------------------------------|:----------------------------------|
@@ -109,10 +320,10 @@ Field Details:
 
 ---
 
-## Beacon Frame
+### Beacon Frame
 **Reference:** IEEE 802.11-2016, Section 9.3.3.3
 
-### Frame Structure
+#### Frame Structure
 
 | Field Name             | Size      | Notes                                  |
 |:-----------------------|:----------|:---------------------------------------|
@@ -169,10 +380,10 @@ Field Details:
 
 ---
 
-## Deauthentication Frame
+### Deauthentication Frame
 **Reference:** IEEE 802.11-2016, Section 9.3.3.13
 
-### Frame Structure
+#### Frame Structure
 
 | Field Name      | Size     |
 |:----------------|:---------|
@@ -223,10 +434,10 @@ Common Reason Codes:
 
 ---
 
-## Disassociation Frame
+### Disassociation Frame
 **Reference:** IEEE 802.11-2016, Section 9.3.3.12
 
-### Frame Structure
+#### Frame Structure
 
 | Field Name      | Size     |
 |:----------------|:---------|
@@ -275,10 +486,10 @@ Reason Codes (Same as Deauthentication):
 
 ---
 
-## Probe Request Frame
+### Probe Request Frame
 **Reference:** IEEE 802.11-2016, Section 9.3.3.9
 
-### Frame Structure
+#### Frame Structure
 
 | Field Name        | Notes                   |
 |:------------------|:------------------------|
@@ -358,3 +569,71 @@ IEEE 802.11 Association Request, Flags: ....
 ```
 
 For more packet capture examples and analysis, refer to the [Wireshark Wiki](https://wiki.wireshark.org/IEEE_802.11).
+
+## Safety Features and Error Handling
+
+1. Memory Safety
+   - DMA-aligned buffer operations
+   - Buffer overflow protection
+   - Atomic sequence number handling
+   - ISR-safe function implementation
+
+2. Input Validation
+   - MAC address format verification
+   - SSID length checks (max 32 bytes)
+   - Valid channel range (1-14)
+   - Frame type validation
+
+3. Hardware Protection
+   - Channel hopping delays
+   - Watchdog feeding
+   - Hardware ready checks
+   - Transmission power management
+
+4. Error Recovery
+   - Automatic retry mechanism
+   - Channel blacklisting
+   - Adaptive hopping strategy
+   - Transmission timeout handling
+
+## Responsible Usage Guidelines
+
+1. Always obtain proper authorization before testing
+2. Use only on networks you own or have permission to test
+3. Follow local regulations regarding RF transmission
+4. Maintain appropriate transmission power levels
+5. Avoid network disruption or interference
+
+## Troubleshooting Guide
+
+### Common Issues and Solutions
+
+1. **Sequence Number Issues**
+   - Symptom: Frame sequence numbers not incrementing properly
+   - Solution: Verify get_next_sequence() is being called atomically
+   - Check: Monitor sequence values in debug mode with 'd' command
+
+2. **Frame Transmission Failures**
+   - Symptom: No acknowledgment from target
+   - Solutions:
+     - Verify channel matches target (use 's' command)
+     - Check MAC address format is correct
+     - Ensure proper frame type selection
+
+3. **Compilation Errors**
+   - Issue: undefined reference to 'get_next_sequence'
+     - Solution: Include ieee80211_structs.h
+   - Issue: redefinition of variables
+     - Solution: Check scope of frame builder variables
+
+4. **Debug Tips**
+   - Use 'd' command to enable debug logging
+   - Monitor frame transmission with 'l' command
+   - Use 'e' to focus on error messages only
+   - Check sequence numbers with 's' command
+
+### Performance Optimization
+- Keep frame building functions in ICACHE_RAM_ATTR
+- Minimize operations in interrupt context
+- Use appropriate delay between frame transmissions
+- Monitor memory usage in continuous mode

@@ -1,14 +1,33 @@
-# Educational Use License
+# Educational and Research Use License
 
 Copyright (c) 2025 stdnt-c1
 
-This software and associated documentation files (the "Software") are provided for educational and research purposes only. By using this Software, you agree to the following conditions:
+This software and associated documentation files (the "Software") are provided for EDUCATIONAL AND RESEARCH PURPOSES ONLY. By using this Software, you agree to the following conditions:
 
-1. The Software may only be used for educational and research purposes.
-2. Any use of the Software must comply with all local laws and regulations.
-3. You may not use the Software for any malicious or harmful purposes.
-4. The Software is provided "AS IS", without warranty of any kind.
-5. The authors are not liable for any damages arising from the use of this Software.
+## License Conditions
+
+1. Educational and Research Use Only
+   - The Software may only be used for educational and research purposes
+   - No commercial use is permitted
+   - No malicious or harmful use is permitted
+
+2. Legal Compliance
+   - Users must comply with all local, national, and international laws and regulations
+   - Users must obtain necessary permits for radio frequency transmission
+   - Users must respect and comply with network security policies
+   - Users must adhere to telecommunications regulations
+
+3. Warranty and Liability
+   - The Software is provided "AS IS", without warranty of any kind
+   - No implied warranties of merchantability or fitness for purpose
+   - Authors and contributors assume no liability for any damages
+   - Users accept all risks associated with using the Software
+
+4. Technical Limitations
+   - Software may cause unintended interference with wireless networks
+   - No guarantee of compatibility with any hardware or software
+   - Performance and reliability are not guaranteed
+   - Security vulnerabilities may exist
 
 ## Usage Requirements
 

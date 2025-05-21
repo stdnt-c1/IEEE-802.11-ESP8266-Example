@@ -2,12 +2,20 @@
   <h1>ESP8266 IEEE 802.11 Management Frame Toolkit</h1>
   
   <p>
+    <img src="https://img.shields.io/badge/Version-2.0.0-blue.svg" alt="Version">
     <img src="https://img.shields.io/badge/Platform-ESP8266-blue.svg" alt="Platform">
-    <img src="https://img.shields.io/badge/Standard-IEEE%20802.11-ff69b4.svg" alt="IEEE 802.11">
+    <img src="https://img.shields.io/badge/Standard-IEEE%20802.11--2016-ff69b4.svg" alt="IEEE 802.11">
     <img src="https://img.shields.io/badge/License-Educational%20%7C%20Research-important.svg" alt="License">
     <img src="https://img.shields.io/badge/Status-Active-brightgreen.svg" alt="Status">
-    <img src="https://img.shields.io/badge/Frames-Beacon%20%7C%20Assoc%20Req%20%7C%20Deauth%20%7C%20Disassoc-orange.svg" alt="Frames">
-    <img src="https://img.shields.io/badge/Last%20Updated-May%202025-yellow.svg" alt="Last Updated">
+    <img src="https://img.shields.io/badge/Frames-Beacon%20%7C%20Assoc%20%7C%20Deauth%20%7C%20Disassoc-orange.svg" alt="Frames">
+    <img src="https://img.shields.io/badge/Updated-May%2021%2C%202025-yellow.svg" alt="Last Updated">
+  </p>
+
+  <p>
+    <b>ESP8266 Framework Version:</b> 3.1.2<br>
+    <b>SDK Version:</b> 3.0.5<br>
+    <b>IEEE Standard:</b> 802.11-2016<br>
+    <b>Build Date:</b> May 21, 2025
   </p>
 </div>
 
@@ -83,28 +91,81 @@ These headers are included in the [ESP8266 RTOS SDK](https://github.com/espressi
 3. **Upload:**
    - Select your ESP8266 board and upload the sketch
 4. **Serial Commands:**
-   - `type beacon` — Select Beacon frame
-   - `type assoc` — Select Association Request frame
-   - `type deauth` — Select Deauthentication frame
-   - `type disassoc` — Select Disassociation frame
-   - `ssid MyNetwork` — Set SSID
-   - `mac 12:34:56:78:9A:BC` — Set MAC address
-   - `channel 6` — Set channel
-   - `reason 3` — Set reason code (for deauth/disassoc)
-   - `send` — Transmit the frame
-   - `help` — Show all commands
+   - `t` — Trigger single transmission
+   - `c` — Toggle continuous mode
+   - `d` — Toggle debug mode
+   - `h` — Show help menu
+   - `s` — Show current status
+   - `m` — Set target MAC (format: XX:XX:XX:XX:XX:XX)
+   - `f` — Select frame type:
+     - `0` - Association Request
+     - `1` - Beacon
+     - `2` - Deauthentication
+     - `3` - Disassociation
+   - `n` — Set network SSID
+   - `r` — Set reason code (for deauth/disassoc)
+   - `1-9` — Set WiFi channel (1-9)
+
+   Use `h` to show the help menu or `s` to display current settings including:
+   - Continuous/Debug mode status
+   - Current channel
+   - Target/Source MAC addresses
+   - SSID and Frame type
+   - Reason code (for deauth/disassoc)
 5. **Monitor Output:**
    - Serial output provides status, debug, and error messages.
 
 ## ⚠️ Terms, Disclaimer & Ethics
 
-> **This project is for educational and research purposes only.**
+**CRITICAL SAFETY AND LEGAL NOTICE**
 
-- Transmitting arbitrary 802.11 management frames may disrupt WiFi networks and is subject to legal restrictions in many countries.
-- The authors and contributors are not responsible for any misuse or damages caused by this code.
-- Use only on networks and devices you own or have explicit permission to test.
-- Always comply with your local laws and regulations regarding wireless transmissions.
-- All use is at your own risk.
+This project is provided **STRICTLY FOR EDUCATIONAL AND RESEARCH PURPOSES ONLY**. Users must:
+
+1. **Legal Compliance**
+   - Ensure all usage complies with local/national laws
+   - Obtain necessary authorizations before testing
+   - Follow telecommunications regulations
+   - Respect network security policies
+
+2. **Safety Considerations**
+   - Never use on production/live networks
+   - Test only in controlled environments
+   - Maintain proper documentation of testing
+   - Monitor for unintended interference
+
+3. **Ethical Guidelines**
+   - Use only for learning/research
+   - Never attempt unauthorized access
+   - Document all testing procedures
+   - Report vulnerabilities responsibly
+
+**DISCLAIMERS:**
+- No warranty of fitness for any purpose
+- Authors assume no liability for damages
+- Use at your own risk
+- No support for malicious use
+
+By using this code, you acknowledge these terms and accept full responsibility.
+
+## 🔄 Recent Updates
+
+### Version 2.0 (May 2025)
+- Added atomic sequence number handling
+- Improved frame builder error checking
+- Enhanced documentation and safety warnings
+- Added troubleshooting guide
+- Updated command interface reference
+
+### Known Issues
+- See troubleshooting section in example.md
+- Monitor GitHub issues for latest updates
+
+## 📖 Documentation
+
+Detailed documentation is available in:
+- [`sample/example.md`](IEEE-80211-8266/sample/example.md) - Complete frame examples and command reference
+- [`docs/`](docs/) - Additional technical documentation
+- GitHub Wiki - Installation and configuration guides
 
 ## 📝 Technical Notes
 - The code uses packed C structs and manual buffer construction to ensure IEEE 802.11 compliance.
@@ -118,6 +179,37 @@ These headers are included in the [ESP8266 RTOS SDK](https://github.com/espressi
 - [Arduino ESP8266 Core](https://github.com/esp8266/Arduino)
 - [Wikipedia: IEEE 802.11 Management Frames](https://en.wikipedia.org/wiki/IEEE_802.11#Management_frames)
 
+## 📁 Project Structure
+
+```
+IEEE-80211-8266/
+├── IEEE-80211-8266.ino      # Main Arduino sketch file
+├── ieee80211_structs.h      # IEEE 802.11 frame structures and definitions
+├── sample/
+│   └── example.md           # Detailed frame examples and documentation
+├── docs/
+│   └── SECURITY.md         # Security considerations and warnings
+├── LICENSE                  # Educational use license
+└── README.md               # Project overview and getting started
+```
+
+## 🔄 Version History
+
+### v2.0.0 (May 21, 2025)
+- Added atomic sequence number handling
+- Improved frame builder error checking
+- Enhanced documentation with safety warnings
+- Added troubleshooting guide
+- Updated command interface reference
+- Added channel management strategies
+- Performance optimizations
+
+### v1.0.0 (Initial Release)
+- Basic IEEE 802.11 frame construction
+- Support for 4 management frame types
+- Serial command interface
+- Channel hopping capabilities
+- Debug mode
 
 ## 🔧 Development
 
