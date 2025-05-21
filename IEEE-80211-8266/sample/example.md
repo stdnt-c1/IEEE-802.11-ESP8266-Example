@@ -4,17 +4,13 @@ This document provides annotated code and explanations for the construction of m
 
 ## General Frame Structure
 All management frames follow this basic structure:
-```
-+-------------+-------------+-------------+-------------+
-|                   MAC Header (24 bytes)              |
-+-------------+-------------+-------------+-------------+
-|              Frame-specific Fixed Fields             |
-+-------------+-------------+-------------+-------------+
-|         Tagged Parameters (Information Elements)      |
-+-------------+-------------+-------------+-------------+
-|             Frame Check Sequence (4 bytes)           |
-+-------------+-------------+-------------+-------------+
-```
+
+| Data Frame Sections                        |
+|:-------------------------------------------|
+| MAC Header (24 bytes)                      |
+| Frame-specific Fixed Fields                |
+| Tagged Parameters (Information Elements)   |
+| Frame Check Sequence (4 bytes)             |
 
 ## References and Documentation
 
@@ -34,17 +30,16 @@ All management frames follow this basic structure:
 **Reference:** IEEE 802.11-2016, Section 9.3.3.6
 
 ### Frame Structure
-```
-+-------------+-------------+-------------+-------------+
-|                   MAC Header (24 bytes)              |
-+-------------+-------------+-------------+-------------+
-|   Capability Information  |   Listen Interval        |
-|        (2 bytes)         |      (2 bytes)           |
-+-------------+-------------+-------------+-------------+
-|   SSID      |  Supported |    HT       |   Other    |
-|   Element   |   Rates    | Capabilities| Elements   |
-+-------------+-------------+-------------+-------------+
-```
+
+| Section                             | Details                           |
+|:------------------------------------|:----------------------------------|
+| **MAC Header** | 24 bytes                          |
+| **Capability Information** | 2 bytes                           |
+| **Listen Interval** | 2 bytes                           |
+| **SSID Element** | (Information Element)             |
+| **Supported Rates** | (Information Element)             |
+| **HT Capabilities** | (Information Element)             |
+| **Other Elements** | (Information Element)             |
 
 ```cpp
 // Builds an Association Request frame for joining an AP
@@ -118,17 +113,14 @@ Field Details:
 **Reference:** IEEE 802.11-2016, Section 9.3.3.3
 
 ### Frame Structure
-```
-+-------------+-------------+-------------+-------------+
-|                   MAC Header (24 bytes)              |
-+-------------+-------------+-------------+-------------+
-|                 Timestamp (8 bytes)                  |
-+-------------+-------------+-------------+-------------+
-| Beacon      | Capability |                          |
-| Interval    |   Info     |     Tagged Parameters    |
-| (2 bytes)   | (2 bytes)  |                          |
-+-------------+-------------+-------------+-------------+
-```
+
+| Field Name             | Size      | Notes                                  |
+|:-----------------------|:----------|:---------------------------------------|
+| **MAC Header** | 24 bytes  |                                        |
+| **Timestamp** | 8 bytes   |                                        |
+| **Beacon Interval** | 2 bytes   | Part of Frame-specific Fixed Fields    |
+| **Capability Info** | 2 bytes   | Part of Frame-specific Fixed Fields    |
+| **Tagged Parameters** | Varies    | Includes elements like SSID, Supported Rates, etc. |
 
 ```cpp
 // Builds a Beacon frame for announcing a network
@@ -181,13 +173,11 @@ Field Details:
 **Reference:** IEEE 802.11-2016, Section 9.3.3.13
 
 ### Frame Structure
-```
-+-------------+-------------+-------------+-------------+
-|                   MAC Header (24 bytes)              |
-+-------------+-------------+-------------+-------------+
-|              Reason Code (2 bytes)                   |
-+-------------+-------------+-------------+-------------+
-```
+
+| Field Name      | Size     |
+|:----------------|:---------|
+| **MAC Header** | 24 bytes |
+| **Reason Code** | 2 bytes  |
 
 ```cpp
 // Builds a Deauthentication frame to force a client to disconnect
@@ -237,13 +227,11 @@ Common Reason Codes:
 **Reference:** IEEE 802.11-2016, Section 9.3.3.12
 
 ### Frame Structure
-```
-+-------------+-------------+-------------+-------------+
-|                   MAC Header (24 bytes)              |
-+-------------+-------------+-------------+-------------+
-|              Reason Code (2 bytes)                   |
-+-------------+-------------+-------------+-------------+
-```
+
+| Field Name      | Size     |
+|:----------------|:---------|
+| **MAC Header** | 24 bytes |
+| **Reason Code** | 2 bytes  |
 
 ```cpp
 // Builds a Disassociation frame to gracefully disconnect a client
@@ -291,14 +279,14 @@ Reason Codes (Same as Deauthentication):
 **Reference:** IEEE 802.11-2016, Section 9.3.3.9
 
 ### Frame Structure
-```
-+-------------+-------------+-------------+-------------+
-|                   MAC Header (24 bytes)              |
-+-------------+-------------+-------------+-------------+
-|   SSID      |  Supported |   Extended  |    HT      |
-|   Element   |   Rates    |   Rates    | Capabilities|
-+-------------+-------------+-------------+-------------+
-```
+
+| Field Name        | Notes                   |
+|:------------------|:------------------------|
+| **MAC Header** | 24 bytes                |
+| **SSID Element** | Tagged Parameter        |
+| **Supported Rates** | Tagged Parameter        |
+| **Extended Rates**| Tagged Parameter        |
+| **HT Capabilities** | Tagged Parameter        |
 
 ```cpp
 // Builds a Probe Request frame to discover networks
