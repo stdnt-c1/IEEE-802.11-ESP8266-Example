@@ -4,9 +4,11 @@
 #include <stdint.h>
 #include <ESP8266WiFi.h>
 
-// Forward declaration of ESP8266 SDK function
+// Forward declarations of ESP8266 SDK functions
 extern "C" {
     int8_t system_get_rssi(void);
+    void ets_delay_us(uint32_t us);
+    void system_soft_wdt_feed(void);
 }
 
 // Frame type and subtype definitions
@@ -21,9 +23,7 @@ extern "C" {
 #define IEEE80211_SUBTYPE_DEAUTH       0x0C
 
 // External declarations
-extern uint16_t sequence_number;
 extern uint8_t channel_scan;
-extern uint16_t sequence_number;
 
 // ESP8266 SDK specific definitions
 #ifndef ETS_WDEV_INTR_DISABLE
